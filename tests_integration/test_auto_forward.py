@@ -32,6 +32,7 @@ DOCKER_SSH_PASSWORD = "root"
 
 # Custom SSH config path for Docker tests
 _DOCKER_SSH_CONFIG_PATH = None
+_DOCKER_SSH_PORT = None
 
 
 def find_free_port() -> int:
@@ -45,7 +46,10 @@ def find_free_port() -> int:
 
 def create_ssh_config_for_docker(port: int) -> str:
     """Create a custom SSH config file for Docker container."""
-    global _DOCKER_SSH_CONFIG_PATH
+    global _DOCKER_SSH_CONFIG_PATH, _DOCKER_SSH_PORT
+
+    # Store port for paramiko
+    _DOCKER_SSH_PORT = port
 
     # Create a temp file for SSH config
     fd, path = tempfile.mkstemp(suffix="_ssh_config")
@@ -69,21 +73,49 @@ Host integration
 
 def cleanup_ssh_config():
     """Remove the custom SSH config file."""
-    global _DOCKER_SSH_CONFIG_PATH
+    global _DOCKER_SSH_CONFIG_PATH, _DOCKER_SSH_PORT
     if _DOCKER_SSH_CONFIG_PATH and os.path.exists(_DOCKER_SSH_CONFIG_PATH):
         os.remove(_DOCKER_SSH_CONFIG_PATH)
     _DOCKER_SSH_CONFIG_PATH = None
+    _DOCKER_SSH_PORT = None
+
+
+def get_ssh_env() -> dict:
+    """Get environment with SSH_CONFIG set for Docker tests."""
+    env = os.environ.copy()
+    if USE_DOCKER and _DOCKER_SSH_CONFIG_PATH:
+        env["SSH_CONFIG"] = _DOCKER_SSH_CONFIG_PATH
+    return env
 
 
 def ssh_command(command: str, host: str = None) -> tuple[bool, str]:
     """Run a command on the remote server via SSH."""
     host = host or TEST_HOST
-    cmd = ["ssh"]
 
-    # Use custom config for Docker
+    # For Docker, use paramiko with password auth
+    if USE_DOCKER and _DOCKER_SSH_PORT:
+        try:
+            client = SSHClient()
+            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            client.connect(
+                "127.0.0.1",
+                port=_DOCKER_SSH_PORT,
+                username=DOCKER_SSH_USER,
+                password=DOCKER_SSH_PASSWORD,
+                timeout=30,
+            )
+            stdin, stdout, stderr = client.exec_command(command)
+            output = stdout.read().decode()
+            error = stderr.read().decode()
+            client.close()
+            return True, output + error
+        except Exception as e:
+            return False, str(e)
+
+    # For real SSH hosts, use subprocess ssh
+    cmd = ["ssh"]
     if USE_DOCKER and _DOCKER_SSH_CONFIG_PATH:
         cmd.extend(["-F", _DOCKER_SSH_CONFIG_PATH])
-
     cmd.append(host)
     cmd.append(command)
 
@@ -226,7 +258,8 @@ class TestAutoForwardSamePort:
                 [sys.executable, "-m", "ssh_auto_forward.cli", test_host, "--cli", "-i", "3", "-m", "20000"],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True
+                text=True,
+                env=get_ssh_env()
             )
 
             # Wait for forwarding to start
@@ -403,7 +436,8 @@ class TestMultiplePorts:
                 [sys.executable, "-m", "ssh_auto_forward.cli", test_host, "--cli", "-i", "3", "-m", "20000"],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True
+                text=True,
+                env=get_ssh_env()
             )
             time.sleep(5)
 
@@ -446,7 +480,8 @@ class TestSkipList:
                 [sys.executable, "-m", "ssh_auto_forward.cli", test_host, "--cli", "-i", "3"],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True
+                text=True,
+                env=get_ssh_env()
             )
             time.sleep(5)
 
@@ -481,7 +516,8 @@ class TestSkipList:
                 [sys.executable, "-m", "ssh_auto_forward.cli", test_host, "--cli", "-i", "3", "-s", str(test_port)],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True
+                text=True,
+                env=get_ssh_env()
             )
             time.sleep(5)
 
@@ -508,7 +544,8 @@ class TestConnectionHandling:
             [sys.executable, "-m", "ssh_auto_forward.cli", "nonexistent-host-test-12345", "--cli"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True
+            text=True,
+            env=get_ssh_env()
         )
 
         try:
