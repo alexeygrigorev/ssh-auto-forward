@@ -47,15 +47,18 @@ def find_free_port() -> int:
 
 def generate_ssh_key() -> str:
     """Generate a temporary SSH key pair and return the private key path."""
+    import paramiko.rsakey
+
     fd, private_key_path = tempfile.mkstemp(suffix="_ssh_test_key")
     os.close(fd)
-    public_key_path = private_key_path + ".pub"
 
-    # Generate key using ssh-keygen
-    subprocess.run([
-        "ssh-keygen", "-t", "rsa", "-b", "2048",
-        "-f", private_key_path, "-N", "", "-q"
-    ], check=True)
+    # Generate key using paramiko
+    key = paramiko.RSAKey.generate(2048)
+    key.write_private_key_file(private_key_path)
+
+    # Write public key
+    with open(private_key_path + ".pub", "w") as f:
+        f.write(f"{key.get_name()} {key.get_base64()}")
 
     return private_key_path
 
