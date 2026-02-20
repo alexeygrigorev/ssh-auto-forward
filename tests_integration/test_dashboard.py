@@ -1,10 +1,17 @@
 """Integration tests for ssh-auto-forward dashboard using Textual Pilot API."""
 
 import pytest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from ssh_auto_forward.dashboard import DashboardApp
 from textual.color import Color
+
+
+@pytest.fixture(autouse=True)
+def mock_webbrowser_open():
+    """Mock webbrowser.open to prevent actual browser opening during tests."""
+    with patch("webbrowser.open") as mock:
+        yield mock
 
 
 @pytest.mark.asyncio
@@ -96,7 +103,7 @@ async def test_dashboard_click_selector():
 
 
 @pytest.mark.asyncio
-async def test_dashboard_open_url_with_forwarded_port():
+async def test_dashboard_open_url_with_forwarded_port(mock_webbrowser_open):
     """Test pressing 'O' opens URL in browser for forwarded port."""
     # Create a mock forwarder with a forwarded port
     mock_tunnel = Mock()
@@ -119,10 +126,12 @@ async def test_dashboard_open_url_with_forwarded_port():
         await pilot.pause()
         await pilot.press("o")  # Open URL
         await pilot.pause()
+        # Verify browser was opened with correct URL
+        mock_webbrowser_open.assert_called_once_with("http://127.0.0.1:8000")
 
 
 @pytest.mark.asyncio
-async def test_dashboard_open_url_with_no_forwarded_port():
+async def test_dashboard_open_url_with_no_forwarded_port(mock_webbrowser_open):
     """Test pressing 'O' on non-forwarded port does nothing."""
     mock_forwarder = Mock()
     mock_forwarder.host_alias = "testhost"
@@ -142,7 +151,8 @@ async def test_dashboard_open_url_with_no_forwarded_port():
         await pilot.pause()
         await pilot.press("o")
         await pilot.pause()
-        # Should not crash
+        # Should not crash and browser should not be opened
+        mock_webbrowser_open.assert_not_called()
 
 
 @pytest.mark.asyncio
