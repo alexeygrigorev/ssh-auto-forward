@@ -158,10 +158,10 @@ curl http://localhost:9999/
 uv run pytest tests/ -v
 ```
 
-### Integration tests (Docker, recommended):
+### Integration tests (Docker, default):
 
 ```bash
-SSH_AUTO_FORWARD_USE_DOCKER=1 uv run pytest tests_integration/ -v
+uv run pytest tests_integration/ -v
 ```
 
 This starts a Docker container with SSH server and tests against it.
