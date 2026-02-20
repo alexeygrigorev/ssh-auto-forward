@@ -6,10 +6,8 @@ from typing import TYPE_CHECKING, List, Tuple
 
 from textual.app import App, ComposeResult
 from textual.widgets import Header, Footer, Static, DataTable, RichLog
-from textual.containers import Container, Horizontal, Vertical
+from textual.containers import Vertical
 from textual.binding import Binding
-from textual import events
-from textual.screen import ModalScreen
 
 if TYPE_CHECKING:
     from ssh_auto_forward.forwarder import SSHAutoForwarder
@@ -57,7 +55,6 @@ class TunnelDataTable(DataTable):
         """Refresh the table data from the forwarder."""
         # Save current state
         old_cursor_row = self.cursor_row
-        old_scroll_row = self.scroll_row if hasattr(self, 'scroll_row') else 0
         selected_port = None
 
         try:

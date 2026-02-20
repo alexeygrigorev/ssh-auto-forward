@@ -522,8 +522,6 @@ class SSHAutoForwarder:
 
     def scan_and_forward(self):
         """Scan for new ports and set up forwarding."""
-        import time
-
         remote_ports = self.get_remote_listening_ports()
 
         if not remote_ports:
