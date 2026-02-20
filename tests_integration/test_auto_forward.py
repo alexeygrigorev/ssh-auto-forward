@@ -44,6 +44,9 @@ def setup_ssh_config_for_docker(port: int):
     ssh_config_path = os.path.expanduser("~/.ssh/config")
     backup_path = os.path.expanduser("~/.ssh/config.bak")
 
+    # Ensure .ssh directory exists
+    os.makedirs(os.path.dirname(ssh_config_path), exist_ok=True)
+
     # Backup existing config
     if os.path.exists(ssh_config_path):
         with open(ssh_config_path, "r") as f:
