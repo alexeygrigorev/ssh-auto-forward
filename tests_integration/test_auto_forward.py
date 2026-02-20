@@ -132,6 +132,9 @@ def docker_ssh_server():
 
     IMPORTANT: Only SSH port is exposed. Other ports are NOT accessible directly,
     which simulates a firewall scenario. The only way to reach them is via SSH forwarding.
+
+    This is an autouse fixture when Docker is enabled - it will automatically run
+    before any tests that need SSH access.
     """
     if not USE_DOCKER:
         yield None
@@ -183,6 +186,13 @@ def docker_ssh_server():
         ["docker", "rm", "-f", DOCKER_CONTAINER_NAME],
         capture_output=True,
     )
+
+
+# Autouse fixture that ensures docker_ssh_server runs when Docker is enabled
+@pytest.fixture(scope="module", autouse=USE_DOCKER)
+def auto_docker_ssh(docker_ssh_server):
+    """Autouse fixture to ensure Docker SSH server is available when needed."""
+    return docker_ssh_server
 
 
 @pytest.fixture
