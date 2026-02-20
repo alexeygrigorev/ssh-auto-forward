@@ -30,9 +30,10 @@ DOCKER_CONTAINER_NAME = "ssh-auto-forward-test"
 DOCKER_SSH_USER = "root"
 DOCKER_SSH_PASSWORD = "root"
 
-# Custom SSH config path for Docker tests
+# Custom SSH config path and key for Docker tests
 _DOCKER_SSH_CONFIG_PATH = None
 _DOCKER_SSH_PORT = None
+_DOCKER_SSH_KEY_PATH = None
 
 
 def find_free_port() -> int:
@@ -44,12 +45,28 @@ def find_free_port() -> int:
     return port
 
 
-def create_ssh_config_for_docker(port: int) -> str:
-    """Create a custom SSH config file for Docker container."""
-    global _DOCKER_SSH_CONFIG_PATH, _DOCKER_SSH_PORT
+def generate_ssh_key() -> str:
+    """Generate a temporary SSH key pair and return the private key path."""
+    fd, private_key_path = tempfile.mkstemp(suffix="_ssh_test_key")
+    os.close(fd)
+    public_key_path = private_key_path + ".pub"
 
-    # Store port for paramiko
+    # Generate key using ssh-keygen
+    subprocess.run([
+        "ssh-keygen", "-t", "rsa", "-b", "2048",
+        "-f", private_key_path, "-N", "", "-q"
+    ], check=True)
+
+    return private_key_path
+
+
+def create_ssh_config_for_docker(port: int, key_path: str) -> str:
+    """Create a custom SSH config file for Docker container."""
+    global _DOCKER_SSH_CONFIG_PATH, _DOCKER_SSH_PORT, _DOCKER_SSH_KEY_PATH
+
+    # Store paths and port
     _DOCKER_SSH_PORT = port
+    _DOCKER_SSH_KEY_PATH = key_path
 
     # Create a temp file for SSH config
     fd, path = tempfile.mkstemp(suffix="_ssh_config")
@@ -60,6 +77,7 @@ Host integration
     HostName 127.0.0.1
     Port {port}
     User {DOCKER_SSH_USER}
+    IdentityFile {key_path}
     StrictHostKeyChecking no
     UserKnownHostsFile /dev/null
 """
@@ -72,12 +90,18 @@ Host integration
 
 
 def cleanup_ssh_config():
-    """Remove the custom SSH config file."""
-    global _DOCKER_SSH_CONFIG_PATH, _DOCKER_SSH_PORT
+    """Remove the custom SSH config and keys."""
+    global _DOCKER_SSH_CONFIG_PATH, _DOCKER_SSH_PORT, _DOCKER_SSH_KEY_PATH
     if _DOCKER_SSH_CONFIG_PATH and os.path.exists(_DOCKER_SSH_CONFIG_PATH):
         os.remove(_DOCKER_SSH_CONFIG_PATH)
+    if _DOCKER_SSH_KEY_PATH and os.path.exists(_DOCKER_SSH_KEY_PATH):
+        os.remove(_DOCKER_SSH_KEY_PATH)
+        pub_key = _DOCKER_SSH_KEY_PATH + ".pub"
+        if os.path.exists(pub_key):
+            os.remove(pub_key)
     _DOCKER_SSH_CONFIG_PATH = None
     _DOCKER_SSH_PORT = None
+    _DOCKER_SSH_KEY_PATH = None
 
 
 def get_ssh_env() -> dict:
@@ -91,28 +115,6 @@ def get_ssh_env() -> dict:
 def ssh_command(command: str, host: str = None) -> tuple[bool, str]:
     """Run a command on the remote server via SSH."""
     host = host or TEST_HOST
-
-    # For Docker, use paramiko with password auth
-    if USE_DOCKER and _DOCKER_SSH_PORT:
-        try:
-            client = SSHClient()
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-            client.connect(
-                "127.0.0.1",
-                port=_DOCKER_SSH_PORT,
-                username=DOCKER_SSH_USER,
-                password=DOCKER_SSH_PASSWORD,
-                timeout=30,
-            )
-            stdin, stdout, stderr = client.exec_command(command)
-            output = stdout.read().decode()
-            error = stderr.read().decode()
-            client.close()
-            return True, output + error
-        except Exception as e:
-            return False, str(e)
-
-    # For real SSH hosts, use subprocess ssh
     cmd = ["ssh"]
     if USE_DOCKER and _DOCKER_SSH_CONFIG_PATH:
         cmd.extend(["-F", _DOCKER_SSH_CONFIG_PATH])
@@ -164,19 +166,27 @@ def docker_ssh_server():
     # Find a free port for SSH
     ssh_port = find_free_port()
 
+    # Generate SSH key pair
+    private_key_path = generate_ssh_key()
+    with open(private_key_path + ".pub", "r") as f:
+        public_key = f.read().strip()
+
     # Remove existing container if any
     subprocess.run(
         ["docker", "rm", "-f", DOCKER_CONTAINER_NAME],
         capture_output=True,
     )
 
-    # Start new SSH container - ONLY expose SSH port
+    # Start new SSH container with authorized_keys
     subprocess.run([
         "docker", "run", "-d",
         "--name", DOCKER_CONTAINER_NAME,
         "-p", f"{ssh_port}:22",  # Only SSH port exposed!
+        "-e", f"PUBLIC_KEY={public_key}",
         "-e", f"SSH_PASSWORD={DOCKER_SSH_PASSWORD}",
-        DOCKER_SSH_IMAGE
+        "-e", "SSH_ENABLE_PASSWORD_AUTH=true",
+        DOCKER_SSH_IMAGE,
+        "sh", "-c", f"mkdir -p /root/.ssh && echo '{public_key}' > /root/.ssh/authorized_keys && chmod 700 /root/.ssh && chmod 600 /root/.ssh/authorized_keys && /usr/sbin/sshd -D -e"
     ], check=True)
 
     # Wait for SSH to be ready
@@ -189,8 +199,8 @@ def docker_ssh_server():
     else:
         pytest.fail("Docker SSH server did not start in time")
 
-    # Create custom SSH config
-    config_path = create_ssh_config_for_docker(ssh_port)
+    # Create custom SSH config with the generated key
+    config_path = create_ssh_config_for_docker(ssh_port, private_key_path)
 
     # Return the host alias to use
     yield "integration"
