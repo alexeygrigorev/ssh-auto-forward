@@ -24,8 +24,8 @@ TEST_HOST = os.getenv("SSH_AUTO_FORWARD_TEST_HOST", "hetzner")
 
 # Docker SSH container settings (default: use Docker)
 # Set SSH_AUTO_FORWARD_USE_DOCKER=0 to use a real SSH server instead
-USE_DOCKER = os.getenv("SSH_AUTO_FORWARD_USE_DOCKER", "1") == "1" and os.getenv("SSH_AUTO_FORWARD_TEST_HOST", "") == ""
-DOCKER_SSH_IMAGE = "atmozvs/ssh-server:latest"
+USE_DOCKER = os.getenv("SSH_AUTO_FORWARD_USE_DOCKER", "0") == "1" and os.getenv("SSH_AUTO_FORWARD_TEST_HOST", "") == ""
+DOCKER_SSH_IMAGE = "panubo/sshd:latest"
 DOCKER_CONTAINER_NAME = "ssh-auto-forward-test"
 DOCKER_SSH_USER = "root"
 DOCKER_SSH_PASSWORD = "root"
