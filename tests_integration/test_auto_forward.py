@@ -25,7 +25,7 @@ TEST_HOST = os.getenv("SSH_AUTO_FORWARD_TEST_HOST", "hetzner")
 # Docker SSH container settings (default: use Docker)
 # Set SSH_AUTO_FORWARD_USE_DOCKER=0 to use a real SSH server instead
 USE_DOCKER = os.getenv("SSH_AUTO_FORWARD_USE_DOCKER", "1") == "1" and os.getenv("SSH_AUTO_FORWARD_TEST_HOST", "") == ""
-DOCKER_SSH_IMAGE = "panubo/sshd:latest"
+DOCKER_SSH_IMAGE = "atmozvs/ssh-server:latest"
 DOCKER_CONTAINER_NAME = "ssh-auto-forward-test"
 DOCKER_SSH_USER = "root"
 DOCKER_SSH_PASSWORD = "root"
@@ -180,26 +180,14 @@ def docker_ssh_server():
         capture_output=True,
     )
 
-    # Create temp directory for authorized_keys
-    import shutil
-    temp_dir = tempfile.mkdtemp()
-    auth_keys_path = os.path.join(temp_dir, "authorized_keys")
-    with open(auth_keys_path, "w") as f:
-        f.write(public_key + "\n")
-
-    # Start new SSH container
+    # Start new SSH container with public key as env var
     subprocess.run([
         "docker", "run", "-d",
         "--name", DOCKER_CONTAINER_NAME,
         "-p", f"{ssh_port}:22",  # Only SSH port exposed!
-        "-v", f"{temp_dir}:/ssh-keys:ro",
+        "-e", f"PUBLIC_KEY={public_key}",
+        "-e", "PASSWORD=root",
         DOCKER_SSH_IMAGE
-    ], check=True)
-
-    # Copy authorized_keys to container
-    subprocess.run([
-        "docker", "exec", DOCKER_CONTAINER_NAME,
-        "sh", "-c", "mkdir -p /root/.ssh && cp /ssh-keys/authorized_keys /root/.ssh/ && chmod 700 /root/.ssh && chmod 600 /root/.ssh/authorized_keys"
     ], check=True)
 
     # Wait for SSH to be ready
@@ -229,7 +217,6 @@ def docker_ssh_server():
         ["docker", "rm", "-f", DOCKER_CONTAINER_NAME],
         capture_output=True,
     )
-    shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 # Autouse fixture that ensures docker_ssh_server runs when Docker is enabled
