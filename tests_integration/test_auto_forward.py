@@ -27,7 +27,7 @@ TEST_HOST = os.getenv("SSH_AUTO_FORWARD_TEST_HOST", None)
 
 # Skip all tests if no SSH host is provided
 if not TEST_HOST:
-    pytest.skip("Skipping integration tests: SSH_AUTO_FORWARD_TEST_HOST not set")
+    pytest.skip("Skipping integration tests: SSH_AUTO_FORWARD_TEST_HOST not set", allow_module_level=True)
 
 # Docker SSH container settings (default: use Docker)
 # Set SSH_AUTO_FORWARD_USE_DOCKER=0 to use a real SSH server instead
