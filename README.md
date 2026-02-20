@@ -6,7 +6,7 @@ Automatically detect and forward ports from a remote SSH server to your local ma
 
 ## Features
 
-- **Interactive TUI dashboard** - View and manage tunnels in real-time
+- Interactive TUI dashboard - View and manage tunnels in real-time
 - Automatically discovers listening ports on the remote server
 - Shows process names for each forwarded port
 - Forwards ports to your local machine via SSH tunneling
@@ -17,30 +17,18 @@ Automatically detect and forward ports from a remote SSH server to your local ma
 - Skips well-known ports (< 1000) by default
 - Configurable max auto-forward port (default: 10000)
 
-## Dashboard Controls
-
-| Key | Action |
-|-----|--------|
-| `X` / `Enter` | Toggle port (open if closed, close if opened) |
-| `O` | Open URL in browser (for forwarded ports) |
-| `R` | Refresh port list |
-| `L` | Toggle log panel |
-| `Q` | Quit |
-
-## CLI Mode
-
-For headless operation, use the `--cli` flag:
-
-```bash
-ssh-auto-forward hetzner --cli
-```
-
 ## Installation
 
 ### With uv (recommended):
 
 ```bash
 uvx ssh-auto-forward hetzner
+```
+
+### Install with pip:
+
+```bash
+pip install ssh-auto-forward
 ```
 
 ### Install locally:
@@ -50,24 +38,37 @@ cd portforwards
 uv sync
 ```
 
-This installs the `ssh-auto-forward` command.
+## Running
 
-### Local development:
-
-```bash
-make run ARGS=hetzner
-make run ARGS="hetzner -v"
-```
-
-## Usage
-
-### Basic usage - uses host from your SSH config:
+### Dashboard mode (default):
 
 ```bash
 ssh-auto-forward hetzner
 ```
 
-### Options:
+### CLI mode (headless):
+
+```bash
+ssh-auto-forward hetzner --cli
+```
+
+### With uvx (no installation):
+
+```bash
+uvx ssh-auto-forward hetzner
+```
+
+## Dashboard Controls
+
+| Key | Action |
+|-----|--------|
+| X / Enter | Toggle port (open if closed, close if opened) |
+| O | Open URL in browser (for forwarded ports) |
+| R | Refresh port list |
+| L | Toggle log panel |
+| Q | Quit |
+
+## Options
 
 ```
 -v, --verbose           Enable verbose logging
@@ -75,12 +76,20 @@ ssh-auto-forward hetzner
 -p, --port-range MIN:MAX Local port range for remapping (default: 3000:10000)
 -s, --skip PORTS        Comma-separated ports to skip (default: all ports < 1000)
 -c, --config PATH       Path to SSH config file
+-m, --max-auto-port PORT Maximum port to auto-forward (default: 10000)
+--cli                   Run in CLI mode instead of dashboard
 --version               Show version and exit
 ```
 
-### Examples:
+## Examples
 
 ```bash
+# Dashboard mode (default)
+ssh-auto-forward hetzner
+
+# CLI mode
+ssh-auto-forward hetzner --cli
+
 # Scan every 3 seconds
 ssh-auto-forward hetzner -i 3
 
@@ -92,6 +101,9 @@ ssh-auto-forward hetzner -s 22,80,443
 
 # Verbose mode
 ssh-auto-forward hetzner -v
+
+# Only auto-forward ports up to 5000 (higher ports shown but not auto-forwarded)
+ssh-auto-forward hetzner -m 5000
 ```
 
 ## How it works
@@ -112,8 +124,6 @@ ssh-auto-forward hetzner -v
 ✗ Remote port 2999 is no longer listening, stopping tunnel
 ```
 
-The terminal title also updates to show: `ssh-auto-forward: hetzner (18 tunnels active)`
-
 ## Testing
 
 Start a test server on your remote machine:
@@ -122,21 +132,16 @@ Start a test server on your remote machine:
 ssh hetzner "python3 -m http.server 9999 --bind 127.0.0.1 &"
 ```
 
-Then run `ssh-auto-forward hetzner` and you should see:
-
-```
-✓ Forwarding remote port 9999 -> local port 3003 (python3)
-```
-
-Access it locally:
+Then run `ssh-auto-forward hetzner` and access it locally:
 
 ```bash
-curl http://localhost:3003/
+curl http://localhost:9999/
 ```
 
 ## Stopping
 
-Press `Ctrl+C` to stop the forwarder and close all tunnels.
+- Dashboard: Press `Q`
+- CLI mode: Press `Ctrl+C`
 
 ## Requirements
 
@@ -160,9 +165,3 @@ uv run pytest tests/ -v
 ```bash
 SSH_AUTO_FORWARD_TEST_HOST=hetzner uv run pytest tests_integration/ -v
 ```
-
-The integration tests:
-- Test that remote ports are forwarded to the same local port when available
-- Test that ports increment by 1 when the local port is busy
-- Test auto-detection of new ports
-- Test auto-cleanup when remote ports close
