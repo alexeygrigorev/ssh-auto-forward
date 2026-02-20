@@ -14,6 +14,8 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: pip install uv
-      - run: uv sync
-      - run: uv run pytest tests/
+      - run: uv sync --dev
+      - run: uv run pytest tests/ -v
+      - name: Run integration tests with Docker
+        run: uv run pytest tests_integration/ -v
       - run: uv run ruff check ssh_auto_forward/
