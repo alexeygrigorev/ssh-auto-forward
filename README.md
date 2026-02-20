@@ -155,13 +155,19 @@ curl http://localhost:9999/
 ### Unit tests (run locally, no SSH required):
 
 ```bash
-make test
-# or
 uv run pytest tests/ -v
 ```
 
-### Integration tests (require SSH access):
+### Integration tests (Docker, recommended):
 
 ```bash
-SSH_AUTO_FORWARD_TEST_HOST=hetzner uv run pytest tests_integration/ -v
+SSH_AUTO_FORWARD_USE_DOCKER=1 uv run pytest tests_integration/ -v
+```
+
+This starts a Docker container with SSH server and tests against it.
+
+### Integration tests (real SSH server):
+
+```bash
+SSH_AUTO_FORWARD_TEST_HOST=your-server uv run pytest tests_integration/ -v
 ```
