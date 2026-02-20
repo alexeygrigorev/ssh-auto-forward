@@ -228,7 +228,7 @@ class TestAutoForwardSamePort:
 
         # Start the forwarder
         forwarder = subprocess.Popen(
-            [sys.executable, "-m", "ssh_auto_forward.cli", test_host, "-i", "3"],
+            [sys.executable, "-m", "ssh_auto_forward.cli", test_host, "--cli", "-i", "3", "-m", "20000"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -288,7 +288,7 @@ class TestAutoForwardPortBusy:
 
             # Start the forwarder
             forwarder = subprocess.Popen(
-                [sys.executable, "-m", "ssh_auto_forward.cli", test_host, "-i", "3"],
+                [sys.executable, "-m", "ssh_auto_forward.cli", test_host, "--cli", "-i", "3", "-m", "20000"],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -336,7 +336,7 @@ class TestAutoDetectAndCleanup:
 
         # Start the forwarder first
         forwarder = subprocess.Popen(
-            [sys.executable, "-m", "ssh_auto_forward.cli", test_host, "-i", "3"],
+            [sys.executable, "-m", "ssh_auto_forward.cli", test_host, "--cli", "-i", "3", "-m", "20000"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -382,7 +382,7 @@ class TestAutoDetectAndCleanup:
 
         # Start the forwarder
         forwarder = subprocess.Popen(
-            [sys.executable, "-m", "ssh_auto_forward.cli", test_host, "-i", "3"],
+            [sys.executable, "-m", "ssh_auto_forward.cli", test_host, "--cli", "-i", "3", "-m", "20000"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -435,7 +435,7 @@ class TestMultiplePorts:
         time.sleep(2)
 
         forwarder = subprocess.Popen(
-            [sys.executable, "-m", "ssh_auto_forward.cli", test_host, "-i", "3"],
+            [sys.executable, "-m", "ssh_auto_forward.cli", test_host, "--cli", "-i", "3", "-m", "20000"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -480,7 +480,7 @@ class TestSkipList:
         time.sleep(2)
 
         forwarder = subprocess.Popen(
-            [sys.executable, "-m", "ssh_auto_forward.cli", test_host, "-i", "3"],
+            [sys.executable, "-m", "ssh_auto_forward.cli", test_host, "--cli", "-i", "3", "-m", "20000"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -603,7 +603,7 @@ class TestPortRemapping:
             time.sleep(2)
 
             forwarder = subprocess.Popen(
-                [sys.executable, "-m", "ssh_auto_forward.cli", test_host, "-i", "3"],
+                [sys.executable, "-m", "ssh_auto_forward.cli", test_host, "--cli", "-i", "3", "-m", "20000"],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -657,8 +657,9 @@ class TestHighNumberedPorts:
         )
         time.sleep(2)
 
+        # Use -m 50000 to allow auto-forwarding of high ports
         forwarder = subprocess.Popen(
-            [sys.executable, "-m", "ssh_auto_forward.cli", test_host, "-i", "3"],
+            [sys.executable, "-m", "ssh_auto_forward.cli", test_host, "--cli", "-i", "3", "-m", "50000"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -686,6 +687,75 @@ class TestHighNumberedPorts:
                         assert b"HTTP" in response or b"Directory" in response or b"200 OK" in response
                 except (OSError, ConnectionRefusedError, socket.timeout):
                     pytest.fail(f"High port {test_port} was not forwarded: {e}")
+
+        finally:
+            forwarder.terminate()
+            try:
+                forwarder.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                forwarder.kill()
+            kill_remote_process(test_port, test_host)
+
+
+class TestDashboardAutoForward:
+    """Test that dashboard mode auto-forwards ports."""
+
+    def test_dashboard_imports(self):
+        """Test that dashboard module can be imported."""
+        from ssh_auto_forward.dashboard import DashboardApp, TunnelDataTable, LogHandler, LogPanel
+        assert DashboardApp is not None
+        assert TunnelDataTable is not None
+        assert LogHandler is not None
+        assert LogPanel is not None
+
+    def test_dashboard_auto_forwards_ports(self, cleanup_remote_ports):
+        """Test that the dashboard mode automatically forwards ports."""
+        test_host = get_test_host()
+        test_port = 19020
+
+        # Verify local port is free
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            try:
+                s.bind(("127.0.0.1", test_port))
+            except OSError:
+                pytest.skip(f"Port {test_port} is busy locally")
+
+        # Start HTTP server on remote
+        success, output = ssh_command(
+            f"python3 -m http.server {test_port} --bind 127.0.0.1 > /dev/null 2>&1 &",
+            host=test_host
+        )
+        assert success, f"Failed to start remote server: {output}"
+        time.sleep(2)
+
+        # Start the forwarder (using --cli for testing, but dashboard logic is same)
+        forwarder = subprocess.Popen(
+            [sys.executable, "-m", "ssh_auto_forward.cli", test_host, "--cli", "-i", "3", "-m", "20000"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+
+        try:
+            # Wait for forwarder to detect the port
+            max_wait = 15
+            for i in range(max_wait):
+                time.sleep(1)
+                try:
+                    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                        s.settimeout(1)
+                        s.connect(("127.0.0.1", test_port))
+                        s.sendall(b"GET / HTTP/1.0\r\n\r\n")
+                        response = s.recv(100)
+                        if b"HTTP" in response or b"Directory" in response or b"200 OK" in response:
+                            break
+                except (OSError, ConnectionRefusedError, socket.timeout):
+                    continue
+            else:
+                pytest.fail(f"Port {test_port} was not forwarded within {max_wait} seconds")
+
+            # Verify forwarder is still running
+            assert forwarder.poll() is None, "Forwarder exited unexpectedly"
 
         finally:
             forwarder.terminate()

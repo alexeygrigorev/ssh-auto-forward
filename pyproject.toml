@@ -12,6 +12,7 @@ dynamic = ["version"]
 
 dependencies = [
     "paramiko>=3.4.0",
+    "textual>=8.0.0",
 ]
 
 authors = [
@@ -36,6 +37,7 @@ ssh-auto-forward = "ssh_auto_forward.cli:main"
 dev = [
     "hatch",
     "pytest",
+    "pytest-asyncio>=1.3.0",
     "pytest-cov",
     "ruff",
 ]

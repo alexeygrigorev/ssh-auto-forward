@@ -5,7 +5,7 @@ from unittest.mock import Mock, MagicMock, patch
 
 import pytest
 
-from ssh_auto_forward.cli import SSHAutoForwarder, SSHTunnel, DEFAULT_SKIP_PORTS
+from ssh_auto_forward.forwarder import SSHAutoForwarder, SSHTunnel, DEFAULT_SKIP_PORTS
 
 
 class TestSSHTunnel:
@@ -31,7 +31,7 @@ class TestSSHTunnel:
         tunnel = SSHTunnel(ssh_client, "localhost", 8080, 3000)
 
         # Mock socket and server socket
-        with patch('ssh_auto_forward.cli.socket.socket') as mock_socket_class:
+        with patch('ssh_auto_forward.forwarder.socket.socket') as mock_socket_class:
             mock_server_socket = Mock()
             mock_server_socket.bind.return_value = None
             mock_server_socket.listen.return_value = None
@@ -54,7 +54,7 @@ class TestSSHTunnel:
         tunnel = SSHTunnel(ssh_client, "localhost", 8080, 3000)
 
         # Mock socket to raise OSError (port in use)
-        with patch('ssh_auto_forward.cli.socket.socket') as mock_socket_class:
+        with patch('ssh_auto_forward.forwarder.socket.socket') as mock_socket_class:
             mock_socket = Mock()
             mock_socket_class.return_value = mock_socket
             mock_socket.bind.side_effect = OSError("Address already in use")
@@ -133,7 +133,7 @@ class TestPortAvailability:
         forwarder = SSHAutoForwarder("testhost")
         forwarder.local_port_map = {}
 
-        with patch('ssh_auto_forward.cli.socket.socket') as mock_socket_class:
+        with patch('ssh_auto_forward.forwarder.socket.socket') as mock_socket_class:
             mock_socket = MagicMock()
             mock_socket.__enter__ = Mock(return_value=mock_socket)
             mock_socket.__exit__ = Mock(return_value=False)
@@ -148,7 +148,7 @@ class TestPortAvailability:
         forwarder = SSHAutoForwarder("testhost")
         forwarder.local_port_map = {}
 
-        with patch('ssh_auto_forward.cli.socket.socket') as mock_socket_class:
+        with patch('ssh_auto_forward.forwarder.socket.socket') as mock_socket_class:
             mock_socket = MagicMock()
             mock_socket.__enter__ = Mock(return_value=mock_socket)
             mock_socket.__exit__ = Mock(return_value=False)
@@ -211,7 +211,7 @@ class TestPortForwarding:
         forwarder.failed_ports = set()
 
         with patch.object(forwarder, 'find_available_local_port', return_value=8080):
-            with patch('ssh_auto_forward.cli.SSHTunnel') as mock_tunnel_class:
+            with patch('ssh_auto_forward.forwarder.SSHTunnel') as mock_tunnel_class:
                 mock_tunnel = Mock()
                 mock_tunnel.start.return_value = True
                 mock_tunnel_class.return_value = mock_tunnel
@@ -230,7 +230,7 @@ class TestPortForwarding:
         forwarder.failed_ports = set()
 
         with patch.object(forwarder, 'find_available_local_port', return_value=8080):
-            with patch('ssh_auto_forward.cli.SSHTunnel') as mock_tunnel_class:
+            with patch('ssh_auto_forward.forwarder.SSHTunnel') as mock_tunnel_class:
                 mock_tunnel = Mock()
                 mock_tunnel.start.return_value = False
                 mock_tunnel_class.return_value = mock_tunnel

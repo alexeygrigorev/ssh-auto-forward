@@ -15,4 +15,5 @@ jobs:
           python-version: ${{ matrix.python-version }}
       - run: pip install uv
       - run: uv sync
-      - run: uv run pytest
+      - run: uv run pytest tests/
+      - run: uv run ruff check ssh_auto_forward/
