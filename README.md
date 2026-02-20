@@ -2,18 +2,38 @@
 
 Automatically detect and forward ports from a remote SSH server to your local machine. Similar to VS Code's port forwarding feature, but fully automatic.
 
+![Dashboard](docs/dashboard.svg)
+
 ## Features
 
+- **Interactive TUI dashboard** - View and manage tunnels in real-time
 - Automatically discovers listening ports on the remote server
 - Shows process names for each forwarded port
 - Forwards ports to your local machine via SSH tunneling
 - Handles port conflicts by finding alternative local ports
 - Auto-detects new ports and starts forwarding
 - Auto-detects closed ports and stops forwarding
-- Terminal title shows tunnel count
-- Runs in the background with status updates
 - Reads connection details from your SSH config
 - Skips well-known ports (< 1000) by default
+- Configurable max auto-forward port (default: 10000)
+
+## Dashboard Controls
+
+| Key | Action |
+|-----|--------|
+| `X` / `Enter` | Toggle port (open if closed, close if opened) |
+| `O` | Open URL in browser (for forwarded ports) |
+| `R` | Refresh port list |
+| `L` | Toggle log panel |
+| `Q` | Quit |
+
+## CLI Mode
+
+For headless operation, use the `--cli` flag:
+
+```bash
+ssh-auto-forward hetzner --cli
+```
 
 ## Installation
 
@@ -122,6 +142,7 @@ Press `Ctrl+C` to stop the forwarder and close all tunnels.
 
 - Python 3.10+
 - paramiko
+- textual (for TUI dashboard)
 - Remote server must have `ss` or `netstat` command available
 
 ## Tests
