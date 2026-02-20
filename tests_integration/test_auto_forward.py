@@ -5,6 +5,9 @@ These tests can use either:
 2. A Docker container with SSH server (set SSH_AUTO_FORWARD_USE_DOCKER=1)
 
 Requires Python 3.10+ and pytest.
+
+NOTE: Integration tests require SSH access. Set SSH_AUTO_FORWARD_TEST_HOST to run:
+    SSH_AUTO_FORWARD_TEST_HOST=your-server uv run pytest tests_integration/
 """
 
 import os
@@ -20,7 +23,11 @@ import paramiko
 from paramiko import SSHClient
 
 # Default test host - can be overridden with SSH_AUTO_FORWARD_TEST_HOST
-TEST_HOST = os.getenv("SSH_AUTO_FORWARD_TEST_HOST", "hetzner")
+TEST_HOST = os.getenv("SSH_AUTO_FORWARD_TEST_HOST", None)
+
+# Skip all tests if no SSH host is provided
+if not TEST_HOST:
+    pytest.skip("Skipping integration tests: SSH_AUTO_FORWARD_TEST_HOST not set")
 
 # Docker SSH container settings (default: use Docker)
 # Set SSH_AUTO_FORWARD_USE_DOCKER=0 to use a real SSH server instead
@@ -118,6 +125,9 @@ def get_ssh_env() -> dict:
 def ssh_command(command: str, host: str = None) -> tuple[bool, str]:
     """Run a command on the remote server via SSH."""
     host = host or TEST_HOST
+    if not host:
+        return False, "No SSH host configured"
+
     cmd = ["ssh"]
     if USE_DOCKER and _DOCKER_SSH_CONFIG_PATH:
         cmd.extend(["-F", _DOCKER_SSH_CONFIG_PATH])
@@ -141,6 +151,8 @@ def ssh_command(command: str, host: str = None) -> tuple[bool, str]:
 def kill_remote_process(port: int, host: str = None):
     """Kill any process listening on the given port."""
     host = host or TEST_HOST
+    if not host:
+        return
     ssh_command(f"fuser -k {port}/tcp 2>/dev/null || true", host)
     ssh_command(f"pkill -f 'python.*http.server.*{port}' 2>/dev/null || true", host)
     ssh_command(f"pkill -f 'nc.*-l.*{port}' 2>/dev/null || true", host)
@@ -229,6 +241,10 @@ def auto_docker_ssh(docker_ssh_server):
 @pytest.fixture
 def cleanup_remote_ports():
     """Kill test processes on remote before and after tests."""
+    if not TEST_HOST:
+        yield
+        return
+
     host = "integration" if USE_DOCKER else TEST_HOST
 
     # Cleanup before
@@ -242,6 +258,8 @@ def cleanup_remote_ports():
 
 def get_test_host():
     """Get the test host to use."""
+    if not TEST_HOST:
+        pytest.skip("Skipping test: SSH_AUTO_FORWARD_TEST_HOST not set")
     return "integration" if USE_DOCKER else TEST_HOST
 
 
