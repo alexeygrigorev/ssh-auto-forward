@@ -180,24 +180,39 @@ def docker_ssh_server():
         capture_output=True,
     )
 
-    # Start new SSH container with authorized_keys
+    # Create temp directory for authorized_keys
+    import shutil
+    temp_dir = tempfile.mkdtemp()
+    auth_keys_path = os.path.join(temp_dir, "authorized_keys")
+    with open(auth_keys_path, "w") as f:
+        f.write(public_key + "\n")
+
+    # Start new SSH container
     subprocess.run([
         "docker", "run", "-d",
         "--name", DOCKER_CONTAINER_NAME,
         "-p", f"{ssh_port}:22",  # Only SSH port exposed!
-        "-e", f"PUBLIC_KEY={public_key}",
-        "-e", f"SSH_PASSWORD={DOCKER_SSH_PASSWORD}",
-        "-e", "SSH_ENABLE_PASSWORD_AUTH=true",
-        DOCKER_SSH_IMAGE,
-        "sh", "-c", f"mkdir -p /root/.ssh && echo '{public_key}' > /root/.ssh/authorized_keys && chmod 700 /root/.ssh && chmod 600 /root/.ssh/authorized_keys && /usr/sbin/sshd -D -e"
+        "-v", f"{temp_dir}:/ssh-keys:ro",
+        DOCKER_SSH_IMAGE
+    ], check=True)
+
+    # Copy authorized_keys to container
+    subprocess.run([
+        "docker", "exec", DOCKER_CONTAINER_NAME,
+        "sh", "-c", "mkdir -p /root/.ssh && cp /ssh-keys/authorized_keys /root/.ssh/ && chmod 700 /root/.ssh && chmod 600 /root/.ssh/authorized_keys"
     ], check=True)
 
     # Wait for SSH to be ready
     for _ in range(30):
         try:
-            with socket.create_connection(("127.0.0.1", ssh_port), timeout=1):
+            result = subprocess.run(
+                ["docker", "exec", DOCKER_CONTAINER_NAME, "sh", "-c", "uptime"],
+                capture_output=True,
+                timeout=2,
+            )
+            if result.returncode == 0:
                 break
-        except (OSError, socket.timeout):
+        except (subprocess.TimeoutExpired, OSError):
             time.sleep(1)
     else:
         pytest.fail("Docker SSH server did not start in time")
@@ -214,6 +229,7 @@ def docker_ssh_server():
         ["docker", "rm", "-f", DOCKER_CONTAINER_NAME],
         capture_output=True,
     )
+    shutil.rmtree(temp_dir, ignore_errors=True)
 
 
 # Autouse fixture that ensures docker_ssh_server runs when Docker is enabled
