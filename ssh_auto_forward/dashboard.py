@@ -17,6 +17,30 @@ if TYPE_CHECKING:
 _log_buffer: List[Tuple[str, int]] = []
 
 
+def _human_bytes(n: int) -> str:
+    """Format byte count as human-readable string."""
+    if n < 1024:
+        return f"{n} B"
+    elif n < 1024 * 1024:
+        return f"{n / 1024:.1f} KB"
+    elif n < 1024 * 1024 * 1024:
+        return f"{n / (1024 * 1024):.1f} MB"
+    else:
+        return f"{n / (1024 * 1024 * 1024):.1f} GB"
+
+
+def _human_speed(bps: float) -> str:
+    """Format bytes/sec as human-readable speed string."""
+    if bps < 1:
+        return "idle"
+    elif bps < 1024:
+        return f"{bps:.0f} B/s"
+    elif bps < 1024 * 1024:
+        return f"{bps / 1024:.1f} KB/s"
+    else:
+        return f"{bps / (1024 * 1024):.1f} MB/s"
+
+
 class LogHandler(logging.Handler):
     """Custom logging handler that sends logs to the dashboard."""
 
@@ -48,7 +72,7 @@ class TunnelDataTable(DataTable):
 
     def on_mount(self) -> None:
         """Set up the table when mounted."""
-        self.add_columns("Remote Port", "Local Port", "Process", "Status", "URL")
+        self.add_columns("Remote Port", "Local Port", "Process", "Status", "Traffic", "Speed", "URL")
         self.refresh_data()
 
     def refresh_data(self) -> None:
@@ -93,20 +117,35 @@ class TunnelDataTable(DataTable):
                 status = "[green]● Forwarded[/green]"
                 if port in self.forwarder.manual_tunnels:
                     status += " [dim]([bold]manual[/bold])[/dim]"
+
+                # Traffic stats
+                tunnel = self.forwarder.tunnels[port]
+                stats = tunnel.get_stats()
+                total_bytes = stats["bytes_sent"] + stats["bytes_received"]
+                traffic_display = _human_bytes(total_bytes) if total_bytes > 0 else "-"
+                total_speed = stats["send_speed"] + stats["recv_speed"]
+                speed_display = _human_speed(total_speed)
             elif is_auto_eligible:
                 local_port = ""
                 local_display = "-"
                 url_display = "-"
                 status = "[dim]● Available[/dim]"
+                traffic_display = "-"
+                speed_display = "-"
             else:
                 local_port = ""
                 local_display = "-"
                 url_display = "-"
                 status = "[dim grey58]○ High port (press Enter)[/dim grey58]"
+                traffic_display = "-"
+                speed_display = "-"
 
             proc_display = process_name if process_name else "[dim]unknown[/dim]"
 
-            self.add_row(str(port), local_display, proc_display, status, url_display)
+            self.add_row(
+                str(port), local_display, proc_display, status,
+                traffic_display, speed_display, url_display,
+            )
 
             # Track row for previously selected port
             if selected_port is not None and port == selected_port:

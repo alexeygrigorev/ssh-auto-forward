@@ -3,8 +3,10 @@
 import logging
 import os
 import re
+import select
 import socket
 import threading
+import time
 from typing import Dict, Optional, Set, Tuple
 
 import paramiko
@@ -31,6 +33,14 @@ class SSHTunnel:
         self.server_socket = None
         self.forward_thread = None
         self.active = False
+
+        # Traffic monitoring
+        self.bytes_sent = 0  # bytes sent to remote (upstream)
+        self.bytes_received = 0  # bytes received from remote (downstream)
+        self.last_activity = 0.0  # timestamp of last data transfer
+        self._prev_bytes_sent = 0
+        self._prev_bytes_received = 0
+        self._prev_snapshot_time = 0.0
 
     def start(self):
         """Start the port forwarding in a background thread."""
@@ -108,18 +118,21 @@ class SSHTunnel:
                     break
 
                 # Use select to wait for data on either end
-                import select
                 r, w, x = select.select([sock, chan], [], [], 1.0)
                 if sock in r:
-                    data = sock.recv(4096)
+                    data = sock.recv(65536)
                     if not data:
                         break
-                    chan.send(data)
+                    chan.sendall(data)
+                    self.bytes_sent += len(data)
+                    self.last_activity = time.monotonic()
                 if chan in r:
-                    data = chan.recv(4096)
+                    data = chan.recv(65536)
                     if not data:
                         break
-                    sock.send(data)
+                    sock.sendall(data)
+                    self.bytes_received += len(data)
+                    self.last_activity = time.monotonic()
         except Exception:
             pass
         finally:
@@ -131,6 +144,31 @@ class SSHTunnel:
                 chan.close()
             except Exception:
                 pass
+
+    def get_stats(self):
+        """Return current traffic stats and compute recent speed."""
+        now = time.monotonic()
+        dt = now - self._prev_snapshot_time if self._prev_snapshot_time else 0.0
+
+        if dt > 0:
+            send_speed = (self.bytes_sent - self._prev_bytes_sent) / dt
+            recv_speed = (self.bytes_received - self._prev_bytes_received) / dt
+        else:
+            send_speed = 0.0
+            recv_speed = 0.0
+
+        self._prev_bytes_sent = self.bytes_sent
+        self._prev_bytes_received = self.bytes_received
+        self._prev_snapshot_time = now
+
+        idle_secs = now - self.last_activity if self.last_activity else None
+        return {
+            "bytes_sent": self.bytes_sent,
+            "bytes_received": self.bytes_received,
+            "send_speed": send_speed,
+            "recv_speed": recv_speed,
+            "idle_secs": idle_secs,
+        }
 
     def stop(self):
         """Stop the tunnel."""
@@ -576,7 +614,6 @@ class SSHAutoForwarder:
 
             # Continuous scanning
             while self.running:
-                import time
                 time.sleep(self.scan_interval)
                 self.scan_and_forward()
 

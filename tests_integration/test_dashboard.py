@@ -107,6 +107,10 @@ async def test_dashboard_open_url_with_forwarded_port(mock_webbrowser_open):
     """Test pressing 'O' opens URL in browser for forwarded port."""
     # Create a mock forwarder with a forwarded port
     mock_tunnel = Mock()
+    mock_tunnel.get_stats.return_value = {
+        "bytes_sent": 0, "bytes_received": 0,
+        "send_speed": 0.0, "recv_speed": 0.0, "idle_secs": None,
+    }
     mock_forwarder = Mock()
     mock_forwarder.host_alias = "testhost"
     mock_forwarder.max_auto_port = 10000
@@ -186,6 +190,10 @@ async def test_dashboard_toggle_port_to_start():
 async def test_dashboard_toggle_port_to_stop():
     """Test pressing X or Enter on a forwarded port stops forwarding."""
     mock_tunnel = Mock()
+    mock_tunnel.get_stats.return_value = {
+        "bytes_sent": 0, "bytes_received": 0,
+        "send_speed": 0.0, "recv_speed": 0.0, "idle_secs": None,
+    }
     mock_forwarder = Mock()
     mock_forwarder.host_alias = "testhost"
     mock_forwarder.max_auto_port = 10000
