@@ -106,6 +106,12 @@ ssh-auto-forward hetzner -v
 ssh-auto-forward hetzner -m 5000
 ```
 
+## Performance
+
+Throughput is 150-190 MB/s for large file transfers (45-70% of native `ssh -L`). HTML page latency is 2-3 ms median at up to 10 req/s with zero failures. The overhead comes from paramiko (Python) vs OpenSSH (C) - negligible for interactive use like web browsing.
+
+See [benchmarks/](benchmarks/) for full methodology and results.
+
 ## How it works
 
 1. Connects to your remote server using your SSH config

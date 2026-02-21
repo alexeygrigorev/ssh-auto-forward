@@ -1,0 +1,23 @@
+[
+  {
+    "test": "buffer_sweep",
+    "buffer": 4096,
+    "mbps": 65.1,
+    "elapsed": 1.53,
+    "bytes": 104693516
+  },
+  {
+    "test": "buffer_sweep",
+    "buffer": 16384,
+    "mbps": 151.9,
+    "elapsed": 0.66,
+    "bytes": 104840972
+  },
+  {
+    "test": "buffer_sweep",
+    "buffer": 65536,
+    "mbps": 179.6,
+    "elapsed": 0.56,
+    "bytes": 104857356
+  }
+]

@@ -1,0 +1,178 @@
+[
+  {
+    "test": "large_file",
+    "server": "nginx",
+    "file": "10 MB",
+    "tunnel": "ssh-auto-fwd",
+    "mbps": 121.7,
+    "elapsed": 0.08,
+    "bytes": 10485760
+  },
+  {
+    "test": "large_file",
+    "server": "nginx",
+    "file": "100 MB",
+    "tunnel": "ssh-auto-fwd",
+    "mbps": 158.1,
+    "elapsed": 0.63,
+    "bytes": 104857600
+  },
+  {
+    "test": "large_file",
+    "server": "nginx",
+    "file": "1 GB",
+    "tunnel": "ssh-auto-fwd",
+    "mbps": 141.6,
+    "elapsed": 7.23,
+    "bytes": 1073741824
+  },
+  {
+    "test": "large_file",
+    "server": "darkhttpd",
+    "file": "10 MB",
+    "tunnel": "ssh-auto-fwd",
+    "mbps": 106.1,
+    "elapsed": 0.09,
+    "bytes": 10485760
+  },
+  {
+    "test": "large_file",
+    "server": "darkhttpd",
+    "file": "100 MB",
+    "tunnel": "ssh-auto-fwd",
+    "mbps": 192.8,
+    "elapsed": 0.52,
+    "bytes": 104841216
+  },
+  {
+    "test": "large_file",
+    "server": "darkhttpd",
+    "file": "1 GB",
+    "tunnel": "ssh-auto-fwd",
+    "mbps": 152.6,
+    "elapsed": 6.71,
+    "bytes": 1073741824
+  },
+  {
+    "test": "large_file",
+    "server": "python",
+    "file": "10 MB",
+    "tunnel": "ssh-auto-fwd",
+    "mbps": 131.4,
+    "elapsed": 0.08,
+    "bytes": 10469376
+  },
+  {
+    "test": "large_file",
+    "server": "python",
+    "file": "100 MB",
+    "tunnel": "ssh-auto-fwd",
+    "mbps": 192.9,
+    "elapsed": 0.52,
+    "bytes": 104857600
+  },
+  {
+    "test": "large_file",
+    "server": "python",
+    "file": "1 GB",
+    "tunnel": "ssh-auto-fwd",
+    "mbps": 149.9,
+    "elapsed": 6.83,
+    "bytes": 1073741824
+  },
+  {
+    "test": "streaming_10gb",
+    "tunnel": "ssh-auto-fwd",
+    "mbps": 151.6,
+    "elapsed": 67.6,
+    "bytes": 10737418240
+  },
+  {
+    "test": "large_file",
+    "server": "nginx",
+    "file": "10 MB",
+    "tunnel": "native ssh",
+    "mbps": 164.4,
+    "elapsed": 0.06,
+    "bytes": 10485760
+  },
+  {
+    "test": "large_file",
+    "server": "nginx",
+    "file": "100 MB",
+    "tunnel": "native ssh",
+    "mbps": 287.1,
+    "elapsed": 0.35,
+    "bytes": 104857600
+  },
+  {
+    "test": "large_file",
+    "server": "nginx",
+    "file": "1 GB",
+    "tunnel": "native ssh",
+    "mbps": 269.9,
+    "elapsed": 3.79,
+    "bytes": 1073741824
+  },
+  {
+    "test": "large_file",
+    "server": "darkhttpd",
+    "file": "10 MB",
+    "tunnel": "native ssh",
+    "mbps": 235.3,
+    "elapsed": 0.04,
+    "bytes": 10485760
+  },
+  {
+    "test": "large_file",
+    "server": "darkhttpd",
+    "file": "100 MB",
+    "tunnel": "native ssh",
+    "mbps": 299.4,
+    "elapsed": 0.33,
+    "bytes": 104857600
+  },
+  {
+    "test": "large_file",
+    "server": "darkhttpd",
+    "file": "1 GB",
+    "tunnel": "native ssh",
+    "mbps": 316.9,
+    "elapsed": 3.23,
+    "bytes": 1073741824
+  },
+  {
+    "test": "large_file",
+    "server": "python",
+    "file": "10 MB",
+    "tunnel": "native ssh",
+    "mbps": 191.8,
+    "elapsed": 0.05,
+    "bytes": 10485760
+  },
+  {
+    "test": "large_file",
+    "server": "python",
+    "file": "100 MB",
+    "tunnel": "native ssh",
+    "mbps": 353.0,
+    "elapsed": 0.28,
+    "bytes": 104857600
+  },
+  {
+    "test": "large_file",
+    "server": "python",
+    "file": "1 GB",
+    "tunnel": "native ssh",
+    "mbps": 383.9,
+    "elapsed": 2.67,
+    "bytes": 1073741824
+  },
+  {
+    "test": "streaming_10gb",
+    "tunnel": "native ssh",
+    "mbps": 220.7,
+    "elapsed": 46.4,
+    "bytes": 10737418240
+  }
+]
