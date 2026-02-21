@@ -1,6 +1,7 @@
 """Interactive TUI dashboard for ssh-auto-forward."""
 
 import logging
+import threading
 import webbrowser
 from typing import TYPE_CHECKING, List, Tuple
 
@@ -72,7 +73,7 @@ class TunnelDataTable(DataTable):
 
     def on_mount(self) -> None:
         """Set up the table when mounted."""
-        self.add_columns("Remote Port", "Local Port", "Process", "Status", "Traffic", "Speed", "URL")
+        self.add_columns("Remote", "Local", "Process", "Status", "Traffic", "Speed", "URL")
         self.refresh_data()
 
     def refresh_data(self) -> None:
@@ -136,7 +137,7 @@ class TunnelDataTable(DataTable):
                 local_port = ""
                 local_display = "-"
                 url_display = "-"
-                status = "[dim grey58]○ High port (press Enter)[/dim grey58]"
+                status = "[dim]● Available[/dim]"
                 traffic_display = "-"
                 speed_display = "-"
 
@@ -299,6 +300,38 @@ class LogPanel(Vertical):
         self.display = True
 
 
+class ReconnectOverlay(Static):
+    """Overlay shown when SSH connection is lost."""
+
+    DEFAULT_CSS = """
+    ReconnectOverlay {
+        display: none;
+        width: 100%;
+        height: 100%;
+        content-align: center middle;
+        text-align: center;
+        background: $surface 90%;
+        color: $text;
+        text-style: bold;
+        layer: overlay;
+    }
+    """
+
+    def show_countdown(self, seconds: int) -> None:
+        """Show the overlay with a countdown value."""
+        self.update(f"[bold red]Connection lost[/bold red]\n\nReconnecting in {seconds}...")
+        self.display = True
+
+    def show_connecting(self) -> None:
+        """Show the overlay in 'connecting' state."""
+        self.update("[bold yellow]Reconnecting...[/bold yellow]")
+        self.display = True
+
+    def hide(self) -> None:
+        """Hide the overlay."""
+        self.display = False
+
+
 class DashboardApp(App):
     """The main dashboard application."""
 
@@ -309,6 +342,9 @@ class DashboardApp(App):
         dock: bottom;
     }
     TunnelDataTable {
+        height: 1fr;
+    }
+    #main_content {
         height: 1fr;
     }
     """
@@ -326,6 +362,8 @@ class DashboardApp(App):
         super().__init__(**kwargs)
         self.forwarder = forwarder
         self._log_handler: LogHandler = None
+        self._reconnecting = False
+        self._countdown_timer = None
 
     def compose(self) -> ComposeResult:
         """Compose the UI."""
@@ -344,7 +382,9 @@ class DashboardApp(App):
                 RichLog(id="logs", markup=True, auto_scroll=True, highlight=True),
                 id="logs_container",
             ),
+            id="main_content",
         )
+        yield ReconnectOverlay(id="reconnect_overlay")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -377,15 +417,95 @@ class DashboardApp(App):
 
         log_widget.write(message)
 
+    def _is_connected(self) -> bool:
+        """Check if the SSH connection is still alive."""
+        try:
+            transport = self.forwarder.ssh_client.get_transport()
+            if transport is None or not transport.is_active():
+                return False
+            transport.send_ignore()
+            return True
+        except Exception:
+            return False
+
     def auto_refresh(self) -> None:
-        """Auto-refresh the table data."""
+        """Auto-refresh the table data and check connection health."""
+        if self._reconnecting:
+            return
+        if not self._is_connected():
+            self._start_reconnect()
+            return
         table = self.query_one("#tunnels_table", TunnelDataTable)
         table.refresh_data()
 
+    def _start_reconnect(self) -> None:
+        """Start the reconnection countdown loop."""
+        if self._reconnecting:
+            return
+        self._reconnecting = True
+        logger = logging.getLogger("ssh-auto-forward")
+        logger.warning("SSH connection lost, will attempt to reconnect...")
+        self._reconnect_countdown(5)
+
+    def _reconnect_countdown(self, remaining: int) -> None:
+        """Tick the countdown and attempt reconnect when it reaches 0."""
+        overlay = self.query_one("#reconnect_overlay", ReconnectOverlay)
+        if remaining > 0:
+            overlay.show_countdown(remaining)
+            self._countdown_timer = self.set_timer(1.0, lambda: self._reconnect_countdown(remaining - 1))
+        else:
+            overlay.show_connecting()
+            # Run reconnect in a thread to avoid blocking the UI
+            threading.Thread(target=self._do_reconnect, daemon=True).start()
+
+    def _do_reconnect(self) -> None:
+        """Attempt to reconnect (runs in background thread)."""
+        logger = logging.getLogger("ssh-auto-forward")
+        try:
+            # Close old connection
+            try:
+                self.forwarder.ssh_client.close()
+            except Exception:
+                pass
+            # Clear stale tunnels
+            self.forwarder.tunnels.clear()
+            self.forwarder.local_port_map.clear()
+            self.forwarder.process_names.clear()
+            self.forwarder.manual_tunnels.clear()
+            self.forwarder.failed_ports.clear()
+            self.forwarder.all_remote_ports.clear()
+
+            success = self.forwarder.connect()
+            if success:
+                self.forwarder.scan_and_forward()
+                self.call_from_thread(self._on_reconnect_success)
+            else:
+                self.call_from_thread(self._on_reconnect_failure)
+        except Exception as e:
+            logger.error(f"Reconnect error: {e}")
+            self.call_from_thread(self._on_reconnect_failure)
+
+    def _on_reconnect_success(self) -> None:
+        """Called on the main thread when reconnection succeeds."""
+        logger = logging.getLogger("ssh-auto-forward")
+        logger.info("Reconnected successfully!")
+        self._reconnecting = False
+        overlay = self.query_one("#reconnect_overlay", ReconnectOverlay)
+        overlay.hide()
+        self.query_one("#status").update("[green]✓ Reconnected[/green]")
+        table = self.query_one("#tunnels_table", TunnelDataTable)
+        table.refresh_data()
+
+    def _on_reconnect_failure(self) -> None:
+        """Called on the main thread when reconnection fails - restart countdown."""
+        self._reconnect_countdown(5)
+
     def action_refresh(self) -> None:
         """Refresh the table data."""
-        self.auto_refresh()
-        self.query_one("#status").update("[green]⟳ Refreshed[/green]")
+        if not self._reconnecting:
+            table = self.query_one("#tunnels_table", TunnelDataTable)
+            table.refresh_data()
+            self.query_one("#status").update("[green]⟳ Refreshed[/green]")
 
     def action_toggle_logs(self) -> None:
         """Toggle the log panel."""
