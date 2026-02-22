@@ -1,0 +1,12 @@
+{
+  "host": "hetzner",
+  "results": [
+    {"tool": "ssh-auto-forward", "file": "100kb", "mbps": 10.2, "elapsed": 0.01},
+    {"tool": "ssh-auto-forward", "file": "500kb", "mbps": 11.1, "elapsed": 0.04},
+    {"tool": "ssh-auto-forward", "file": "1mb", "mbps": 12.0, "elapsed": 0.08},
+    {"tool": "ssh-auto-forward", "file": "5mb", "mbps": 11.8, "elapsed": 0.42},
+    {"tool": "ssh-auto-forward", "file": "10mb", "mbps": 11.6, "elapsed": 0.91},
+    {"tool": "ssh-auto-forward", "file": "50mb", "mbps": 11.5, "elapsed": 4.41},
+    {"tool": "ssh-auto-forward", "file": "100mb", "mbps": 11.8, "elapsed": 8.56}
+  ]
+}

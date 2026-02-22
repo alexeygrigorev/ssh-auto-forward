@@ -110,40 +110,91 @@ class SSHTunnel:
                 pass
 
     def _pipe(self, sock, chan):
-        """Pipe data between socket and SSH channel."""
-        try:
-            while self.active:
-                # Check if either end is closed
-                if chan.closed or chan.eof_received:
-                    break
+        """Pipe data between socket and SSH channel using blocking I/O with threads."""
+        import queue
+        stop_event = threading.Event()
+        error_queue = queue.Queue()
 
-                # Use select to wait for data on either end
-                r, w, x = select.select([sock, chan], [], [], 1.0)
-                if sock in r:
+        def forward_socket_to_channel():
+            """Forward data from socket to SSH channel (blocking)."""
+            try:
+                sock.settimeout(30)  # 30 second timeout for large transfers
+                while not stop_event.is_set():
                     data = sock.recv(65536)
                     if not data:
                         break
                     chan.sendall(data)
                     self.bytes_sent += len(data)
                     self.last_activity = time.monotonic()
-                if chan in r:
+            except Exception as e:
+                if not stop_event.is_set():
+                    error_queue.put(("sock_to_chan", e))
+            finally:
+                stop_event.set()
+
+        def forward_channel_to_socket():
+            """Forward data from SSH channel to socket (blocking)."""
+            try:
+                while not stop_event.is_set():
+                    if chan.closed or chan.eof_received:
+                        break
+                    # Blocking recv - Paramiko will handle the internals
                     data = chan.recv(65536)
                     if not data:
                         break
                     sock.sendall(data)
                     self.bytes_received += len(data)
                     self.last_activity = time.monotonic()
+            except Exception as e:
+                if not stop_event.is_set():
+                    error_queue.put(("chan_to_sock", e))
+            finally:
+                stop_event.set()
+
+        # Start both threads
+        t1 = threading.Thread(target=forward_socket_to_channel, daemon=True)
+        t2 = threading.Thread(target=forward_channel_to_socket, daemon=True)
+        t1.start()
+        t2.start()
+
+        # Wait for both threads to complete
+        # Check for errors periodically
+        start_time = time.monotonic()
+        while (t1.is_alive() or t2.is_alive()) and (time.monotonic() - start_time < 300):
+            if not error_queue.empty():
+                break
+            time.sleep(0.1)
+
+        # Signal shutdown
+        stop_event.set()
+
+        # Close socket to unblock threads
+        try:
+            sock.shutdown(socket.SHUT_RDWR)
+        except:
+            pass
+
+        # Wait a bit longer for threads to finish
+        t1.join(timeout=2)
+        t2.join(timeout=2)
+
+        # Log any errors
+        try:
+            while not error_queue.empty():
+                direction, error = error_queue.get_nowait()
+                logger.debug(f"[_pipe] {direction}: {error}")
+        except queue.Empty:
+            pass
+
+        # Cleanup
+        try:
+            sock.close()
         except Exception:
             pass
-        finally:
-            try:
-                sock.close()
-            except Exception:
-                pass
-            try:
-                chan.close()
-            except Exception:
-                pass
+        try:
+            chan.close()
+        except Exception:
+            pass
 
     def get_stats(self):
         """Return current traffic stats and compute recent speed."""
@@ -432,7 +483,8 @@ class SSHAutoForwarder:
 
             # Fallback: just get ports without process names
             commands_fallback = [
-                "ss -tln 2>/dev/null | awk 'NR>1 {print $4}' | cut -d: -f2 | sort -u",
+                "ss -tln 2>/dev/null | awk 'NR>1 {print $4}'",
+                "netstat -tln 2>/dev/null | awk 'NR>1 && /LISTEN/ {print $4}'",
             ]
 
             for cmd in commands_fallback:
@@ -442,9 +494,15 @@ class SSHAutoForwarder:
                 ports = {}
                 for line in output.split("\n"):
                     line = line.strip()
-                    if line and line.isdigit():
-                        ports[int(line)] = ""
+                    if not line:
+                        continue
+                    # Extract port from address (e.g., "0.0.0.0:8080" or "*:8080")
+                    if ":" in line:
+                        port_str = line.split(":")[-1]
+                        if port_str.isdigit():
+                            ports[int(port_str)] = ""
                 if ports:
+                    logger.debug(f"Detected ports using fallback: {cmd.split()[0]}")
                     return ports
 
             return {}
