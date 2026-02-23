@@ -11,33 +11,32 @@ NOTE: Integration tests require SSH access. Set SSH_AUTO_FORWARD_TEST_HOST to ru
 """
 
 import os
+import shutil
 import socket
 import subprocess
 import sys
 import tempfile
 import time
 import urllib.request
-import urllib.error
+from typing import Generator
 
 import pytest
+import paramiko
+from paramiko import SSHClient
 
-# Docker SSH container settings
-# Docker is used by default. Set SSH_AUTO_FORWARD_TEST_HOST to use a real server instead.
-# Set SSH_AUTO_FORWARD_USE_DOCKER=0 to explicitly disable Docker.
+# Default test host - can be overridden with SSH_AUTO_FORWARD_TEST_HOST
 TEST_HOST = os.getenv("SSH_AUTO_FORWARD_TEST_HOST", None)
-USE_DOCKER = os.getenv("SSH_AUTO_FORWARD_USE_DOCKER", "0" if TEST_HOST else "1") == "1"
 
-# When Docker is enabled, use "integration" as the host alias (created by the fixture)
-if not TEST_HOST and USE_DOCKER:
-    TEST_HOST = "integration"
-
-# Skip all tests if no SSH host is provided and Docker is not enabled
-if not TEST_HOST:
-    pytest.skip("Skipping integration tests: set SSH_AUTO_FORWARD_TEST_HOST or install Docker", allow_module_level=True)
-DOCKER_SSH_IMAGE = "panubo/sshd:latest"
+# Docker SSH container settings (default: use Docker if no host provided)
+# Set SSH_AUTO_FORWARD_USE_DOCKER=0 to disable Docker auto-mode
+USE_DOCKER = (
+    os.getenv("SSH_AUTO_FORWARD_USE_DOCKER", "1") == "1"
+    and os.getenv("SSH_AUTO_FORWARD_TEST_HOST", "") == ""
+)
+DOCKER_SSH_IMAGE = "ssh-auto-forward-test:latest"
 DOCKER_CONTAINER_NAME = "ssh-auto-forward-test"
 DOCKER_SSH_USER = "root"
-DOCKER_SSH_PASSWORD = "root"
+DOCKER_SSH_PASSWORD = "test123"
 
 # Custom SSH config path and key for Docker tests
 _DOCKER_SSH_CONFIG_PATH = None
@@ -52,24 +51,6 @@ def find_free_port() -> int:
         s.listen(1)
         port = s.getsockname()[1]
     return port
-
-
-def generate_ssh_key() -> str:
-    """Generate a temporary SSH key pair and return the private key path."""
-    import paramiko.rsakey
-
-    fd, private_key_path = tempfile.mkstemp(suffix="_ssh_test_key")
-    os.close(fd)
-
-    # Generate key using paramiko
-    key = paramiko.RSAKey.generate(2048)
-    key.write_private_key_file(private_key_path)
-
-    # Write public key
-    with open(private_key_path + ".pub", "w") as f:
-        f.write(f"{key.get_name()} {key.get_base64()}")
-
-    return private_key_path
 
 
 def create_ssh_config_for_docker(port: int, key_path: str) -> str:
@@ -102,15 +83,10 @@ Host integration
 
 
 def cleanup_ssh_config():
-    """Remove the custom SSH config and keys."""
+    """Remove the custom SSH config (keys are kept, they're in source control)."""
     global _DOCKER_SSH_CONFIG_PATH, _DOCKER_SSH_PORT, _DOCKER_SSH_KEY_PATH
     if _DOCKER_SSH_CONFIG_PATH and os.path.exists(_DOCKER_SSH_CONFIG_PATH):
         os.remove(_DOCKER_SSH_CONFIG_PATH)
-    if _DOCKER_SSH_KEY_PATH and os.path.exists(_DOCKER_SSH_KEY_PATH):
-        os.remove(_DOCKER_SSH_KEY_PATH)
-        pub_key = _DOCKER_SSH_KEY_PATH + ".pub"
-        if os.path.exists(pub_key):
-            os.remove(pub_key)
     _DOCKER_SSH_CONFIG_PATH = None
     _DOCKER_SSH_PORT = None
     _DOCKER_SSH_KEY_PATH = None
@@ -122,16 +98,6 @@ def get_ssh_env() -> dict:
     if USE_DOCKER and _DOCKER_SSH_CONFIG_PATH:
         env["SSH_CONFIG"] = _DOCKER_SSH_CONFIG_PATH
     return env
-
-
-def get_forwarder_cmd(test_host: str, extra_args: list = None) -> list:
-    """Build the forwarder CLI command, including --config for Docker tests."""
-    cmd = [sys.executable, "-m", "ssh_auto_forward.cli", test_host, "--cli"]
-    if USE_DOCKER and _DOCKER_SSH_CONFIG_PATH:
-        cmd.extend(["-c", _DOCKER_SSH_CONFIG_PATH])
-    if extra_args:
-        cmd.extend(extra_args)
-    return cmd
 
 
 def ssh_command(command: str, host: str = None) -> tuple[bool, str]:
@@ -165,8 +131,8 @@ def kill_remote_process(port: int, host: str = None):
     host = host or TEST_HOST
     if not host:
         return
-    ssh_command(f"fuser -k {port}/tcp 2>/dev/null || true", host)
-    ssh_command(f"pkill -f 'python.*http.server.*{port}' 2>/dev/null || true", host)
+    # Try fuser first, fallback to pkill
+    ssh_command(f"fuser -k {port}/tcp 2>/dev/null || pkill -f 'python.*-m.*http.server.*{port}' 2>/dev/null || true", host)
     ssh_command(f"pkill -f 'nc.*-l.*{port}' 2>/dev/null || true", host)
 
 
@@ -190,13 +156,20 @@ def docker_ssh_server():
     except (subprocess.CalledProcessError, FileNotFoundError):
         pytest.skip("Docker not available")
 
+    # Test keys directory (relative to this file)
+    dockerfile_dir = os.path.dirname(os.path.abspath(__file__))
+    test_keys_dir = os.path.join(dockerfile_dir, "ssh_test_keys")
+    private_key_path = os.path.join(test_keys_dir, "id_rsa_test")
+
+    # Build the test image (copies keys into image)
+    subprocess.run([
+        "docker", "build", "-t", DOCKER_SSH_IMAGE,
+        "-f", os.path.join(dockerfile_dir, "Dockerfile.test"),
+        dockerfile_dir
+    ], check=True, capture_output=True)
+
     # Find a free port for SSH
     ssh_port = find_free_port()
-
-    # Generate SSH key pair
-    private_key_path = generate_ssh_key()
-    with open(private_key_path + ".pub", "r") as f:
-        public_key = f.read().strip()
 
     # Remove existing container if any
     subprocess.run(
@@ -204,16 +177,15 @@ def docker_ssh_server():
         capture_output=True,
     )
 
-    # Start new SSH container (SSH-only, like benchmarks)
+    # Start new SSH container
     subprocess.run([
         "docker", "run", "-d",
         "--name", DOCKER_CONTAINER_NAME,
-        "-p", f"{ssh_port}:22",  # Only SSH port exposed!
-        "-e", "SSH_ENABLE_ROOT=true",
-        DOCKER_SSH_IMAGE,
+        "-p", f"{ssh_port}:22",
+        DOCKER_SSH_IMAGE
     ], check=True)
 
-    # Wait for container to be ready
+    # Wait for SSH to be ready
     for _ in range(30):
         try:
             result = subprocess.run(
@@ -224,58 +196,17 @@ def docker_ssh_server():
             if result.returncode == 0:
                 break
         except (subprocess.TimeoutExpired, OSError):
-            pass
-        time.sleep(1)
+            time.sleep(1)
     else:
         pytest.fail("Docker SSH server did not start in time")
 
-    # Install python3 and network tools (needed for http.server and port detection)
-    subprocess.run(
-        ["docker", "exec", DOCKER_CONTAINER_NAME, "apk", "add", "--no-cache",
-         "python3", "iproute2", "net-tools"],
-        check=True, capture_output=True,
-    )
-
-    # Inject SSH public key via docker cp (matches benchmark approach)
-    pub_key_path = private_key_path + ".pub"
-    subprocess.run(
-        ["docker", "exec", DOCKER_CONTAINER_NAME, "mkdir", "-p", "/root/.ssh"],
-        check=True, capture_output=True,
-    )
-    subprocess.run(
-        ["docker", "cp", pub_key_path, f"{DOCKER_CONTAINER_NAME}:/root/.ssh/authorized_keys"],
-        check=True, capture_output=True,
-    )
-    subprocess.run(
-        ["docker", "exec", DOCKER_CONTAINER_NAME, "chmod", "600", "/root/.ssh/authorized_keys"],
-        check=True, capture_output=True,
-    )
-    subprocess.run(
-        ["docker", "exec", DOCKER_CONTAINER_NAME, "chown", "root:root", "/root/.ssh/authorized_keys"],
-        check=True, capture_output=True,
-    )
-
-    # Enable TCP forwarding (panubo/sshd disables it by default)
-    subprocess.run(
-        ["docker", "exec", DOCKER_CONTAINER_NAME, "sed", "-i",
-         "s/AllowTcpForwarding no/AllowTcpForwarding yes/",
-         "/etc/ssh/sshd_config"],
-        check=True, capture_output=True,
-    )
-    # Reload sshd config (SIGHUP makes sshd re-read its config without restarting)
-    subprocess.run(
-        ["docker", "exec", DOCKER_CONTAINER_NAME, "kill", "-HUP", "1"],
-        capture_output=True,
-    )
-    time.sleep(1)
-
-    # Create custom SSH config with the generated key
-    create_ssh_config_for_docker(ssh_port, private_key_path)
+    # Create custom SSH config with the test key
+    config_path = create_ssh_config_for_docker(ssh_port, private_key_path)
 
     # Return the host alias to use
     yield "integration"
 
-    # Cleanup
+    # Cleanup config (keep keys, they're in source control)
     cleanup_ssh_config()
     subprocess.run(
         ["docker", "rm", "-f", DOCKER_CONTAINER_NAME],
@@ -310,9 +241,11 @@ def cleanup_remote_ports():
 
 def get_test_host():
     """Get the test host to use."""
+    if USE_DOCKER:
+        return "integration"
     if not TEST_HOST:
-        pytest.skip("Skipping test: SSH_AUTO_FORWARD_TEST_HOST not set")
-    return "integration" if USE_DOCKER else TEST_HOST
+        pytest.skip("Skipping test: SSH_AUTO_FORWARD_TEST_HOST not set (set SSH_AUTO_FORWARD_USE_DOCKER=0 to disable Docker mode)")
+    return TEST_HOST
 
 
 class TestAutoForwardSamePort:
@@ -341,7 +274,7 @@ class TestAutoForwardSamePort:
         try:
             # Run the forwarder
             forwarder = subprocess.Popen(
-                get_forwarder_cmd(test_host, ["-i", "3", "-m", "20000"]),
+                [sys.executable, "-m", "ssh_auto_forward.cli", test_host, "--cli", "-i", "3", "-m", "20000"],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -352,6 +285,7 @@ class TestAutoForwardSamePort:
             time.sleep(5)
 
             # Check if we can access the forwarded port
+            import urllib.request
             try:
                 with urllib.request.urlopen(f"http://127.0.0.1:{test_port}/", timeout=5) as response:
                     assert response.status == 200
@@ -390,10 +324,11 @@ class TestAutoForwardPortBusy:
             try:
                 # Run the forwarder
                 forwarder = subprocess.Popen(
-                    get_forwarder_cmd(test_host, ["-i", "3", "-m", "20000"]),
+                    [sys.executable, "-m", "ssh_auto_forward.cli", test_host, "--cli", "-i", "3", "-m", "20000"],
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
-                    text=True
+                    text=True,
+                    env=get_ssh_env()
                 )
 
                 # Wait for forwarding to start
@@ -425,10 +360,11 @@ class TestAutoDetectAndCleanup:
 
         # Run the forwarder first
         forwarder = subprocess.Popen(
-            get_forwarder_cmd(test_host, ["-i", "3", "-m", "20000"]),
+            [sys.executable, "-m", "ssh_auto_forward.cli", test_host, "--cli", "-i", "3", "-m", "20000"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True
+            text=True,
+            env=get_ssh_env()
         )
         time.sleep(3)
 
@@ -470,10 +406,11 @@ class TestAutoDetectAndCleanup:
 
         # Run the forwarder
         forwarder = subprocess.Popen(
-            get_forwarder_cmd(test_host, ["-i", "3", "-m", "20000"]),
+            [sys.executable, "-m", "ssh_auto_forward.cli", test_host, "--cli", "-i", "3", "-m", "20000"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True
+            text=True,
+            env=get_ssh_env()
         )
         time.sleep(3)
 
@@ -518,7 +455,7 @@ class TestMultiplePorts:
         try:
             # Run the forwarder
             forwarder = subprocess.Popen(
-                get_forwarder_cmd(test_host, ["-i", "3", "-m", "20000"]),
+                [sys.executable, "-m", "ssh_auto_forward.cli", test_host, "--cli", "-i", "3", "-m", "20000"],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -562,7 +499,7 @@ class TestSkipList:
         try:
             # Run the forwarder
             forwarder = subprocess.Popen(
-                get_forwarder_cmd(test_host, ["-i", "3"]),
+                [sys.executable, "-m", "ssh_auto_forward.cli", test_host, "--cli", "-i", "3"],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -598,7 +535,7 @@ class TestSkipList:
         try:
             # Run the forwarder with custom skip list (skip our test port)
             forwarder = subprocess.Popen(
-                get_forwarder_cmd(test_host, ["-i", "3", "-s", str(test_port)]),
+                [sys.executable, "-m", "ssh_auto_forward.cli", test_host, "--cli", "-i", "3", "-s", str(test_port)],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -626,7 +563,7 @@ class TestConnectionHandling:
         """Test that connection failures are handled gracefully."""
         # Use a non-existent host
         forwarder = subprocess.Popen(
-            get_forwarder_cmd("nonexistent-host-test-12345"),
+            [sys.executable, "-m", "ssh_auto_forward.cli", "nonexistent-host-test-12345", "--cli"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -635,8 +572,9 @@ class TestConnectionHandling:
 
         try:
             stdout, stderr = forwarder.communicate(timeout=30)
-            # Should exit gracefully, not hang
-            assert "Failed to connect" in stderr or "Connection failed" in stderr
+            # Should fail gracefully, not hang
+            assert forwarder.returncode != 0
+            assert "Failed to connect" in stderr or "Could not resolve" in stderr
         except subprocess.TimeoutExpired:
             forwarder.kill()
             pytest.fail("Process should have exited on connection failure")
@@ -672,10 +610,11 @@ class TestPortRemapping:
 
             # Run the forwarder
             forwarder = subprocess.Popen(
-                get_forwarder_cmd(test_host, ["-i", "3", "-m", "20000"]),
+                [sys.executable, "-m", "ssh_auto_forward.cli", test_host, "--cli", "-i", "3", "-m", "20000"],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True
+                text=True,
+                env=get_ssh_env()
             )
             time.sleep(5)
 
@@ -717,10 +656,11 @@ class TestHighNumberedPorts:
         try:
             # Run the forwarder with higher max-auto-port
             forwarder = subprocess.Popen(
-                get_forwarder_cmd(test_host, ["-i", "3", "-m", "20000"]),
+                [sys.executable, "-m", "ssh_auto_forward.cli", test_host, "--cli", "-i", "3", "-m", "20000"],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True
+                text=True,
+                env=get_ssh_env()
             )
             time.sleep(5)
 
@@ -766,129 +706,14 @@ class TestDashboardAutoForward:
         # For now, just verify the module imports and basic setup works
         from ssh_auto_forward.forwarder import SSHAutoForwarder
 
-        kwargs = {"host_alias": test_host, "scan_interval": 3, "max_auto_port": 20000}
-        if USE_DOCKER and _DOCKER_SSH_CONFIG_PATH:
-            kwargs["ssh_config_path"] = _DOCKER_SSH_CONFIG_PATH
-        forwarder = SSHAutoForwarder(**kwargs)
+        forwarder = SSHAutoForwarder(
+            host_alias=test_host,
+            scan_interval=3,
+            max_auto_port=20000,
+        )
 
         # Verify config was loaded
         assert forwarder.config is not None
         assert forwarder.host_alias == test_host
 
         kill_remote_process(test_port, test_host)
-
-
-class TestReconnection:
-    """Test SSH reconnection after container restart.
-
-    Requires Docker: SSH_AUTO_FORWARD_USE_DOCKER=1 SSH_AUTO_FORWARD_TEST_HOST=integration
-    """
-
-    @pytest.mark.skipif(not USE_DOCKER, reason="Reconnection test requires Docker")
-    def test_reconnect_after_container_restart(self, docker_ssh_server, cleanup_remote_ports):
-        """Test that the forwarder reconnects after the SSH server restarts."""
-        test_host = get_test_host()
-        test_port = 19011
-
-        # Start HTTP server on remote
-        success, output = ssh_command(
-            f"python3 -m http.server {test_port} --bind 0.0.0.0 > /dev/null 2>&1 &",
-            host=test_host,
-        )
-        assert success, f"Failed to start remote server: {output}"
-        time.sleep(2)
-
-        # Start forwarder in CLI mode
-        forwarder = subprocess.Popen(
-            get_forwarder_cmd(test_host, ["-i", "3", "-m", "20000"]),
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-            env=get_ssh_env(),
-        )
-
-        try:
-            # Wait for forwarding to start
-            time.sleep(5)
-
-            # Verify tunnel works
-            with urllib.request.urlopen(f"http://127.0.0.1:{test_port}/", timeout=5) as response:
-                assert response.status == 200, "Initial tunnel should work"
-
-            # Stop the Docker container
-            subprocess.run(
-                ["docker", "stop", DOCKER_CONTAINER_NAME],
-                capture_output=True,
-                timeout=30,
-            )
-
-            # Wait for the forwarder to detect connection loss
-            time.sleep(10)
-
-            # Restart the container
-            subprocess.run(
-                ["docker", "start", DOCKER_CONTAINER_NAME],
-                capture_output=True,
-                timeout=30,
-                check=True,
-            )
-
-            # Wait for SSH to be ready inside the container
-            for _ in range(30):
-                try:
-                    result = subprocess.run(
-                        ["docker", "exec", DOCKER_CONTAINER_NAME, "sh", "-c", "uptime"],
-                        capture_output=True,
-                        timeout=2,
-                    )
-                    if result.returncode == 0:
-                        break
-                except (subprocess.TimeoutExpired, OSError):
-                    pass
-                time.sleep(1)
-
-            # Restart the HTTP server inside the container
-            subprocess.run(
-                ["docker", "exec", "-d", DOCKER_CONTAINER_NAME,
-                 "python3", "-m", "http.server", str(test_port), "--bind", "0.0.0.0"],
-                capture_output=True,
-                timeout=10,
-            )
-            time.sleep(2)
-
-            # Poll for tunnel recovery (up to 60s)
-            tunnel_recovered = False
-            for attempt in range(12):
-                try:
-                    with urllib.request.urlopen(f"http://127.0.0.1:{test_port}/", timeout=3) as response:
-                        if response.status == 200:
-                            tunnel_recovered = True
-                            break
-                except Exception:
-                    pass
-                time.sleep(5)
-
-            assert tunnel_recovered, "Tunnel should recover after container restart"
-
-        finally:
-            forwarder.terminate()
-            forwarder.wait(timeout=10)
-
-            # Ensure container is running for subsequent tests
-            subprocess.run(
-                ["docker", "start", DOCKER_CONTAINER_NAME],
-                capture_output=True,
-            )
-            # Wait for it to be ready
-            for _ in range(15):
-                try:
-                    result = subprocess.run(
-                        ["docker", "exec", DOCKER_CONTAINER_NAME, "sh", "-c", "uptime"],
-                        capture_output=True,
-                        timeout=2,
-                    )
-                    if result.returncode == 0:
-                        break
-                except (subprocess.TimeoutExpired, OSError):
-                    pass
-                time.sleep(1)

@@ -265,7 +265,15 @@ class SSHAutoForwarder:
         self.config = self._load_ssh_config(host_alias)
 
     def _find_ssh_config(self) -> str:
-        """Find the SSH config file."""
+        """Find the SSH config file.
+
+        Checks SSH_CONFIG environment variable first, then standard paths.
+        """
+        # Check SSH_CONFIG environment variable (like ssh does)
+        env_config = os.getenv("SSH_CONFIG")
+        if env_config and os.path.exists(env_config):
+            return env_config
+
         home = os.path.expanduser("~")
         for path in [".ssh/config", ".ssh/config.d/*"]:
             full_path = os.path.join(home, path)
@@ -716,10 +724,14 @@ class SSHAutoForwarder:
         return False
 
     def run(self):
-        """Main loop - connect and continuously scan for ports."""
+        """Main loop - connect and continuously scan for ports.
+
+        Returns:
+            True if connected successfully, False if connection failed.
+        """
         if not self.connect():
             logger.error("Failed to connect. Exiting.")
-            return
+            return False
 
         self.running = True
 

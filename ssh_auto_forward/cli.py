@@ -101,7 +101,8 @@ Examples:
     )
 
     if args.cli:
-        forwarder.run()
+        if not forwarder.run():
+            sys.exit(1)
     else:
         # Dashboard is the default
         forwarder.run_dashboard()
