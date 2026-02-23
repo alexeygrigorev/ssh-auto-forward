@@ -10,7 +10,8 @@
     "p99_ms": 24.7,
     "failed": 0,
     "files_ok": 30,
-    "elapsed": 29.0
+    "elapsed": 29.0,
+    "platform": "windows-hetzner"
   },
   {
     "test": "html_stress",
@@ -23,7 +24,8 @@
     "p99_ms": 19.5,
     "failed": 0,
     "files_ok": 30,
-    "elapsed": 29.0
+    "elapsed": 29.0,
+    "platform": "windows-hetzner"
   },
   {
     "test": "html_stress",
@@ -36,7 +38,8 @@
     "p99_ms": 18.6,
     "failed": 0,
     "files_ok": 30,
-    "elapsed": 29.0
+    "elapsed": 29.0,
+    "platform": "windows-hetzner"
   },
   {
     "test": "html_stress",
@@ -49,7 +52,8 @@
     "p99_ms": 3.0,
     "failed": 0,
     "files_ok": 30,
-    "elapsed": 29.0
+    "elapsed": 29.0,
+    "platform": "windows-hetzner"
   },
   {
     "test": "html_stress",
@@ -62,7 +66,8 @@
     "p99_ms": 2.9,
     "failed": 0,
     "files_ok": 30,
-    "elapsed": 29.0
+    "elapsed": 29.0,
+    "platform": "windows-hetzner"
   },
   {
     "test": "html_stress",
@@ -75,7 +80,8 @@
     "p99_ms": 3.9,
     "failed": 0,
     "files_ok": 30,
-    "elapsed": 29.0
+    "elapsed": 29.0,
+    "platform": "windows-hetzner"
   },
   {
     "test": "html_stress",
@@ -88,7 +94,8 @@
     "p99_ms": 34.1,
     "failed": 0,
     "files_ok": 100,
-    "elapsed": 9.9
+    "elapsed": 9.9,
+    "platform": "windows-hetzner"
   },
   {
     "test": "html_stress",
@@ -101,7 +108,8 @@
     "p99_ms": 20.8,
     "failed": 0,
     "files_ok": 100,
-    "elapsed": 9.9
+    "elapsed": 9.9,
+    "platform": "windows-hetzner"
   },
   {
     "test": "html_stress",
@@ -114,7 +122,8 @@
     "p99_ms": 38.3,
     "failed": 0,
     "files_ok": 100,
-    "elapsed": 9.9
+    "elapsed": 9.9,
+    "platform": "windows-hetzner"
   },
   {
     "test": "html_stress",
@@ -127,7 +136,8 @@
     "p99_ms": 2.0,
     "failed": 0,
     "files_ok": 100,
-    "elapsed": 9.9
+    "elapsed": 9.9,
+    "platform": "windows-hetzner"
   },
   {
     "test": "html_stress",
@@ -140,7 +150,8 @@
     "p99_ms": 2.0,
     "failed": 0,
     "files_ok": 100,
-    "elapsed": 9.9
+    "elapsed": 9.9,
+    "platform": "windows-hetzner"
   },
   {
     "test": "html_stress",
@@ -153,6 +164,175 @@
     "p99_ms": 2.6,
     "failed": 0,
     "files_ok": 100,
-    "elapsed": 9.9
+    "elapsed": 9.9,
+    "platform": "windows-hetzner"
+  },
+  {
+    "test": "html_stress",
+    "server": "nginx",
+    "tunnel": "ssh-auto-fwd",
+    "target_rps": 1.0,
+    "actual_rps": 1.0,
+    "p50_ms": 3.0,
+    "p95_ms": 19.4,
+    "p99_ms": 39.8,
+    "failed": 0,
+    "files_ok": 30,
+    "elapsed": 29.03,
+    "platform": "linux-docker"
+  },
+  {
+    "test": "html_stress",
+    "server": "darkhttpd",
+    "tunnel": "ssh-auto-fwd",
+    "target_rps": 1.0,
+    "actual_rps": 1.0,
+    "p50_ms": 2.7,
+    "p95_ms": 4.4,
+    "p99_ms": 9.6,
+    "failed": 0,
+    "files_ok": 30,
+    "elapsed": 29.0,
+    "platform": "linux-docker"
+  },
+  {
+    "test": "html_stress",
+    "server": "python",
+    "tunnel": "ssh-auto-fwd",
+    "target_rps": 1.0,
+    "actual_rps": 0.0,
+    "p50_ms": 0,
+    "p95_ms": 0,
+    "p99_ms": 0,
+    "failed": 30,
+    "files_ok": 0,
+    "elapsed": 29.0,
+    "platform": "linux-docker"
+  },
+  {
+    "test": "html_stress",
+    "server": "nginx",
+    "tunnel": "native ssh",
+    "target_rps": 1.0,
+    "actual_rps": 1.0,
+    "p50_ms": 1.6,
+    "p95_ms": 3.0,
+    "p99_ms": 13.3,
+    "failed": 0,
+    "files_ok": 30,
+    "elapsed": 29.0,
+    "platform": "linux-docker"
+  },
+  {
+    "test": "html_stress",
+    "server": "darkhttpd",
+    "tunnel": "native ssh",
+    "target_rps": 1.0,
+    "actual_rps": 1.0,
+    "p50_ms": 1.6,
+    "p95_ms": 1.8,
+    "p99_ms": 3.0,
+    "failed": 0,
+    "files_ok": 30,
+    "elapsed": 29.0,
+    "platform": "linux-docker"
+  },
+  {
+    "test": "html_stress",
+    "server": "python",
+    "tunnel": "native ssh",
+    "target_rps": 1.0,
+    "actual_rps": 1.0,
+    "p50_ms": 2.1,
+    "p95_ms": 2.5,
+    "p99_ms": 4.2,
+    "failed": 0,
+    "files_ok": 30,
+    "elapsed": 29.0,
+    "platform": "linux-docker"
+  },
+  {
+    "test": "html_stress",
+    "server": "nginx",
+    "tunnel": "ssh-auto-fwd",
+    "target_rps": 10.0,
+    "actual_rps": 2.4,
+    "p50_ms": 3.0,
+    "p95_ms": 42.8,
+    "p99_ms": 3044.1,
+    "failed": 9,
+    "files_ok": 91,
+    "elapsed": 38.41,
+    "platform": "linux-docker"
+  },
+  {
+    "test": "html_stress",
+    "server": "darkhttpd",
+    "tunnel": "ssh-auto-fwd",
+    "target_rps": 10.0,
+    "actual_rps": 10.1,
+    "p50_ms": 2.5,
+    "p95_ms": 21.7,
+    "p99_ms": 43.8,
+    "failed": 0,
+    "files_ok": 100,
+    "elapsed": 9.92,
+    "platform": "linux-docker"
+  },
+  {
+    "test": "html_stress",
+    "server": "python",
+    "tunnel": "ssh-auto-fwd",
+    "target_rps": 10.0,
+    "actual_rps": 0.0,
+    "p50_ms": 0,
+    "p95_ms": 0,
+    "p99_ms": 0,
+    "failed": 100,
+    "files_ok": 0,
+    "elapsed": 9.9,
+    "platform": "linux-docker"
+  },
+  {
+    "test": "html_stress",
+    "server": "nginx",
+    "tunnel": "native ssh",
+    "target_rps": 10.0,
+    "actual_rps": 10.1,
+    "p50_ms": 1.5,
+    "p95_ms": 1.8,
+    "p99_ms": 2.9,
+    "failed": 0,
+    "files_ok": 100,
+    "elapsed": 9.9,
+    "platform": "linux-docker"
+  },
+  {
+    "test": "html_stress",
+    "server": "darkhttpd",
+    "tunnel": "native ssh",
+    "target_rps": 10.0,
+    "actual_rps": 10.1,
+    "p50_ms": 1.5,
+    "p95_ms": 1.7,
+    "p99_ms": 3.4,
+    "failed": 0,
+    "files_ok": 100,
+    "elapsed": 9.9,
+    "platform": "linux-docker"
+  },
+  {
+    "test": "html_stress",
+    "server": "python",
+    "tunnel": "native ssh",
+    "target_rps": 10.0,
+    "actual_rps": 10.1,
+    "p50_ms": 2.1,
+    "p95_ms": 2.4,
+    "p99_ms": 2.8,
+    "failed": 0,
+    "files_ok": 100,
+    "elapsed": 9.9,
+    "platform": "linux-docker"
   }
 ]

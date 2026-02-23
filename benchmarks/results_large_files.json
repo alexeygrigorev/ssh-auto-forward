@@ -6,7 +6,8 @@
     "tunnel": "ssh-auto-fwd",
     "mbps": 121.7,
     "elapsed": 0.08,
-    "bytes": 10485760
+    "bytes": 10485760,
+    "platform": "windows-hetzner"
   },
   {
     "test": "large_file",
@@ -15,7 +16,8 @@
     "tunnel": "ssh-auto-fwd",
     "mbps": 158.1,
     "elapsed": 0.63,
-    "bytes": 104857600
+    "bytes": 104857600,
+    "platform": "windows-hetzner"
   },
   {
     "test": "large_file",
@@ -24,7 +26,8 @@
     "tunnel": "ssh-auto-fwd",
     "mbps": 141.6,
     "elapsed": 7.23,
-    "bytes": 1073741824
+    "bytes": 1073741824,
+    "platform": "windows-hetzner"
   },
   {
     "test": "large_file",
@@ -33,7 +36,8 @@
     "tunnel": "ssh-auto-fwd",
     "mbps": 106.1,
     "elapsed": 0.09,
-    "bytes": 10485760
+    "bytes": 10485760,
+    "platform": "windows-hetzner"
   },
   {
     "test": "large_file",
@@ -42,7 +46,8 @@
     "tunnel": "ssh-auto-fwd",
     "mbps": 192.8,
     "elapsed": 0.52,
-    "bytes": 104841216
+    "bytes": 104841216,
+    "platform": "windows-hetzner"
   },
   {
     "test": "large_file",
@@ -51,7 +56,8 @@
     "tunnel": "ssh-auto-fwd",
     "mbps": 152.6,
     "elapsed": 6.71,
-    "bytes": 1073741824
+    "bytes": 1073741824,
+    "platform": "windows-hetzner"
   },
   {
     "test": "large_file",
@@ -60,7 +66,8 @@
     "tunnel": "ssh-auto-fwd",
     "mbps": 131.4,
     "elapsed": 0.08,
-    "bytes": 10469376
+    "bytes": 10469376,
+    "platform": "windows-hetzner"
   },
   {
     "test": "large_file",
@@ -69,7 +76,8 @@
     "tunnel": "ssh-auto-fwd",
     "mbps": 192.9,
     "elapsed": 0.52,
-    "bytes": 104857600
+    "bytes": 104857600,
+    "platform": "windows-hetzner"
   },
   {
     "test": "large_file",
@@ -78,14 +86,16 @@
     "tunnel": "ssh-auto-fwd",
     "mbps": 149.9,
     "elapsed": 6.83,
-    "bytes": 1073741824
+    "bytes": 1073741824,
+    "platform": "windows-hetzner"
   },
   {
     "test": "streaming_10gb",
     "tunnel": "ssh-auto-fwd",
     "mbps": 151.6,
     "elapsed": 67.6,
-    "bytes": 10737418240
+    "bytes": 10737418240,
+    "platform": "windows-hetzner"
   },
   {
     "test": "large_file",
@@ -94,7 +104,8 @@
     "tunnel": "native ssh",
     "mbps": 164.4,
     "elapsed": 0.06,
-    "bytes": 10485760
+    "bytes": 10485760,
+    "platform": "windows-hetzner"
   },
   {
     "test": "large_file",
@@ -103,7 +114,8 @@
     "tunnel": "native ssh",
     "mbps": 287.1,
     "elapsed": 0.35,
-    "bytes": 104857600
+    "bytes": 104857600,
+    "platform": "windows-hetzner"
   },
   {
     "test": "large_file",
@@ -112,7 +124,8 @@
     "tunnel": "native ssh",
     "mbps": 269.9,
     "elapsed": 3.79,
-    "bytes": 1073741824
+    "bytes": 1073741824,
+    "platform": "windows-hetzner"
   },
   {
     "test": "large_file",
@@ -121,7 +134,8 @@
     "tunnel": "native ssh",
     "mbps": 235.3,
     "elapsed": 0.04,
-    "bytes": 10485760
+    "bytes": 10485760,
+    "platform": "windows-hetzner"
   },
   {
     "test": "large_file",
@@ -130,7 +144,8 @@
     "tunnel": "native ssh",
     "mbps": 299.4,
     "elapsed": 0.33,
-    "bytes": 104857600
+    "bytes": 104857600,
+    "platform": "windows-hetzner"
   },
   {
     "test": "large_file",
@@ -139,7 +154,8 @@
     "tunnel": "native ssh",
     "mbps": 316.9,
     "elapsed": 3.23,
-    "bytes": 1073741824
+    "bytes": 1073741824,
+    "platform": "windows-hetzner"
   },
   {
     "test": "large_file",
@@ -148,7 +164,8 @@
     "tunnel": "native ssh",
     "mbps": 191.8,
     "elapsed": 0.05,
-    "bytes": 10485760
+    "bytes": 10485760,
+    "platform": "windows-hetzner"
   },
   {
     "test": "large_file",
@@ -157,7 +174,8 @@
     "tunnel": "native ssh",
     "mbps": 353.0,
     "elapsed": 0.28,
-    "bytes": 104857600
+    "bytes": 104857600,
+    "platform": "windows-hetzner"
   },
   {
     "test": "large_file",
@@ -166,13 +184,201 @@
     "tunnel": "native ssh",
     "mbps": 383.9,
     "elapsed": 2.67,
-    "bytes": 1073741824
+    "bytes": 1073741824,
+    "platform": "windows-hetzner"
   },
   {
     "test": "streaming_10gb",
     "tunnel": "native ssh",
     "mbps": 220.7,
     "elapsed": 46.4,
-    "bytes": 10737418240
+    "bytes": 10737418240,
+    "platform": "windows-hetzner"
+  },
+  {
+    "test": "large_file",
+    "server": "nginx",
+    "file": "10 MB",
+    "tunnel": "ssh-auto-fwd",
+    "mbps": 229.7,
+    "elapsed": 0.04,
+    "bytes": 10485760,
+    "platform": "linux-docker"
+  },
+  {
+    "test": "large_file",
+    "server": "nginx",
+    "file": "100 MB",
+    "tunnel": "ssh-auto-fwd",
+    "mbps": 284.2,
+    "elapsed": 0.35,
+    "bytes": 104857600,
+    "platform": "linux-docker"
+  },
+  {
+    "test": "large_file",
+    "server": "nginx",
+    "file": "1 GB",
+    "tunnel": "ssh-auto-fwd",
+    "mbps": 279.7,
+    "elapsed": 3.66,
+    "bytes": 1073741824,
+    "platform": "linux-docker"
+  },
+  {
+    "test": "large_file",
+    "server": "darkhttpd",
+    "file": "10 MB",
+    "tunnel": "ssh-auto-fwd",
+    "mbps": 207.6,
+    "elapsed": 0.05,
+    "bytes": 10485760,
+    "platform": "linux-docker"
+  },
+  {
+    "test": "large_file",
+    "server": "darkhttpd",
+    "file": "100 MB",
+    "tunnel": "ssh-auto-fwd",
+    "mbps": 266.0,
+    "elapsed": 0.38,
+    "bytes": 104857600,
+    "platform": "linux-docker"
+  },
+  {
+    "test": "large_file",
+    "server": "darkhttpd",
+    "file": "1 GB",
+    "tunnel": "ssh-auto-fwd",
+    "mbps": 34.1,
+    "elapsed": 30.05,
+    "bytes": 1073741589,
+    "platform": "linux-docker"
+  },
+  {
+    "test": "large_file",
+    "server": "python",
+    "file": "10 MB",
+    "tunnel": "ssh-auto-fwd",
+    "mbps": 302.0,
+    "elapsed": 0.03,
+    "bytes": 10485760,
+    "platform": "linux-docker"
+  },
+  {
+    "test": "large_file",
+    "server": "python",
+    "file": "100 MB",
+    "tunnel": "ssh-auto-fwd",
+    "mbps": 452.7,
+    "elapsed": 0.22,
+    "bytes": 104857600,
+    "platform": "linux-docker"
+  },
+  {
+    "test": "streaming_10gb",
+    "tunnel": "ssh-auto-fwd",
+    "mbps": 237.4,
+    "elapsed": 30.1,
+    "bytes": 7480442880,
+    "platform": "linux-docker"
+  },
+  {
+    "test": "large_file",
+    "server": "nginx",
+    "file": "10 MB",
+    "tunnel": "native ssh",
+    "mbps": 218.6,
+    "elapsed": 0.05,
+    "bytes": 10485760,
+    "platform": "linux-docker"
+  },
+  {
+    "test": "large_file",
+    "server": "nginx",
+    "file": "100 MB",
+    "tunnel": "native ssh",
+    "mbps": 262.5,
+    "elapsed": 0.38,
+    "bytes": 104857600,
+    "platform": "linux-docker"
+  },
+  {
+    "test": "large_file",
+    "server": "nginx",
+    "file": "1 GB",
+    "tunnel": "native ssh",
+    "mbps": 299.5,
+    "elapsed": 3.42,
+    "bytes": 1073741824,
+    "platform": "linux-docker"
+  },
+  {
+    "test": "large_file",
+    "server": "darkhttpd",
+    "file": "10 MB",
+    "tunnel": "native ssh",
+    "mbps": 212.5,
+    "elapsed": 0.05,
+    "bytes": 10485760,
+    "platform": "linux-docker"
+  },
+  {
+    "test": "large_file",
+    "server": "darkhttpd",
+    "file": "100 MB",
+    "tunnel": "native ssh",
+    "mbps": 277.1,
+    "elapsed": 0.36,
+    "bytes": 104857600,
+    "platform": "linux-docker"
+  },
+  {
+    "test": "large_file",
+    "server": "darkhttpd",
+    "file": "1 GB",
+    "tunnel": "native ssh",
+    "mbps": 290.1,
+    "elapsed": 3.53,
+    "bytes": 1073741824,
+    "platform": "linux-docker"
+  },
+  {
+    "test": "large_file",
+    "server": "python",
+    "file": "10 MB",
+    "tunnel": "native ssh",
+    "mbps": 168.8,
+    "elapsed": 0.06,
+    "bytes": 10485760,
+    "platform": "linux-docker"
+  },
+  {
+    "test": "large_file",
+    "server": "python",
+    "file": "100 MB",
+    "tunnel": "native ssh",
+    "mbps": 274.0,
+    "elapsed": 0.36,
+    "bytes": 104857600,
+    "platform": "linux-docker"
+  },
+  {
+    "test": "large_file",
+    "server": "python",
+    "file": "1 GB",
+    "tunnel": "native ssh",
+    "mbps": 290.0,
+    "elapsed": 3.53,
+    "bytes": 1073741824,
+    "platform": "linux-docker"
+  },
+  {
+    "test": "streaming_10gb",
+    "tunnel": "native ssh",
+    "mbps": 237.7,
+    "elapsed": 43.1,
+    "bytes": 10737418240,
+    "platform": "linux-docker"
   }
 ]
