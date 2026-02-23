@@ -7,7 +7,7 @@ SSH channel using threading with blocking I/O, which works reliably on all platf
 import socket
 import threading
 import time
-from typing import Optional, Tuple
+from typing import Tuple
 
 
 def bidirectional_pipe(
@@ -106,7 +106,7 @@ def bidirectional_pipe(
     # Try to close socket to unblock threads
     try:
         sock.shutdown(socket.SHUT_RDWR)
-    except:
+    except Exception:
         pass
 
     t1.join(timeout=1)
