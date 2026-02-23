@@ -3,7 +3,6 @@
 import logging
 import os
 import re
-import select
 import socket
 import threading
 import time
@@ -171,7 +170,7 @@ class SSHTunnel:
         # Close socket to unblock threads
         try:
             sock.shutdown(socket.SHUT_RDWR)
-        except:
+        except Exception:
             pass
 
         # Wait a bit longer for threads to finish
@@ -656,6 +655,66 @@ class SSHAutoForwarder:
         except Exception:
             pass
 
+    def _is_connected(self) -> bool:
+        """Check if the SSH connection is still alive."""
+        try:
+            transport = self.ssh_client.get_transport()
+            if transport is None or not transport.is_active():
+                return False
+            transport.send_ignore()
+            return True
+        except Exception:
+            return False
+
+    def _clear_stale_state(self):
+        """Stop all tunnels and clear all forwarding state."""
+        for remote_port in list(self.tunnels.keys()):
+            try:
+                self.tunnels[remote_port].stop()
+            except Exception:
+                pass
+        self.tunnels.clear()
+        self.local_port_map.clear()
+        self.process_names.clear()
+        self.manual_tunnels.clear()
+        self.failed_ports.clear()
+        self.all_remote_ports.clear()
+
+    def _reconnect(self) -> bool:
+        """Close old connection, clear state, and retry connect() with backoff.
+
+        Backoff schedule: 5s -> 10s -> 20s -> 40s -> 60s (cap).
+        Sleeps in 1-second increments so Ctrl+C is responsive.
+
+        Returns True if reconnection succeeded, False if self.running became False.
+        """
+        try:
+            self.ssh_client.close()
+        except Exception:
+            pass
+
+        self._clear_stale_state()
+
+        delay = 5
+        while self.running:
+            logger.info(f"Reconnecting in {delay}s...")
+            for _ in range(delay):
+                if not self.running:
+                    return False
+                time.sleep(1)
+
+            if not self.running:
+                return False
+
+            logger.info("Attempting to reconnect...")
+            if self.connect():
+                logger.info("Reconnected successfully!")
+                return True
+
+            delay = min(delay * 2, 60)
+
+        return False
+
     def run(self):
         """Main loop - connect and continuously scan for ports."""
         if not self.connect():
@@ -673,6 +732,13 @@ class SSHAutoForwarder:
             # Continuous scanning
             while self.running:
                 time.sleep(self.scan_interval)
+
+                if not self._is_connected():
+                    logger.warning("SSH connection lost, will attempt to reconnect...")
+                    if not self._reconnect():
+                        break
+                    continue
+
                 self.scan_and_forward()
 
         except KeyboardInterrupt:

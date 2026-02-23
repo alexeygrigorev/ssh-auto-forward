@@ -10,7 +10,7 @@ import select
 import socket
 import threading
 import time
-from typing import Optional, Tuple
+from typing import Tuple
 
 # Platform detection
 IS_WINDOWS = os.name == "nt"
@@ -117,7 +117,7 @@ def bidirectional_pipe(
         # Try to close socket to unblock threads
         try:
             sock.shutdown(socket.SHUT_RDWR)
-        except:
+        except Exception:
             pass
 
         t1.join(timeout=1)

@@ -419,14 +419,7 @@ class DashboardApp(App):
 
     def _is_connected(self) -> bool:
         """Check if the SSH connection is still alive."""
-        try:
-            transport = self.forwarder.ssh_client.get_transport()
-            if transport is None or not transport.is_active():
-                return False
-            transport.send_ignore()
-            return True
-        except Exception:
-            return False
+        return self.forwarder._is_connected()
 
     def auto_refresh(self) -> None:
         """Auto-refresh the table data and check connection health."""
@@ -468,12 +461,7 @@ class DashboardApp(App):
             except Exception:
                 pass
             # Clear stale tunnels
-            self.forwarder.tunnels.clear()
-            self.forwarder.local_port_map.clear()
-            self.forwarder.process_names.clear()
-            self.forwarder.manual_tunnels.clear()
-            self.forwarder.failed_ports.clear()
-            self.forwarder.all_remote_ports.clear()
+            self.forwarder._clear_stale_state()
 
             success = self.forwarder.connect()
             if success:
