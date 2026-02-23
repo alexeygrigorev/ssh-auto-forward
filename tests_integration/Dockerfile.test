@@ -1,0 +1,32 @@
+FROM debian:bookworm-slim
+
+# Avoid interactive prompts during package installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install SSH server, Python, net-tools, and pkill (for process management)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    openssh-server \
+    python3 \
+    net-tools \
+    psmisc \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy test SSH keys
+COPY ssh_test_keys /root/.ssh
+RUN chmod 700 /root/.ssh && \
+    chmod 600 /root/.ssh/id_rsa_test && \
+    chmod 644 /root/.ssh/id_rsa_test.pub && \
+    cp /root/.ssh/id_rsa_test.pub /root/.ssh/authorized_keys && \
+    chmod 600 /root/.ssh/authorized_keys
+
+# Set up SSH
+RUN mkdir -p /var/run/sshd && ssh-keygen -A
+
+# Configure SSH to allow root login with key
+RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin yes/' /etc/ssh/sshd_config
+
+# Expose SSH port
+EXPOSE 22
+
+# Run SSH daemon
+CMD ["/usr/sbin/sshd", "-D", "-e"]
