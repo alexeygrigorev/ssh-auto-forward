@@ -12,6 +12,8 @@ import time
 
 BENCH_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(BENCH_DIR)
+DOCKER_DIR = os.path.join(PROJECT_DIR, "docker")
+TEST_KEY_PATH = os.path.join(DOCKER_DIR, "test_key")
 PYTHON = sys.executable
 
 CONTAINER_NAME = "ssh-auto-forward-bench"
@@ -61,43 +63,8 @@ def run_cmd(cmd, **kw):
 
 def docker_build():
     print("Building Docker image …")
-    run_cmd(["docker", "build", "-t", IMAGE_NAME, BENCH_DIR])
-
-
-def _get_ssh_pubkey_path():
-    """Write the host's SSH public key to a temp file and return its path."""
-    import glob as _glob
-    import tempfile
-
-    pubkey = None
-    # Try .pub files first
-    for pattern in ["~/.ssh/id_*.pub"]:
-        for path in _glob.glob(os.path.expanduser(pattern)):
-            with open(path) as f:
-                pubkey = f.read().strip()
-            break
-    # Derive from private key
-    if not pubkey:
-        for keyfile in ["~/.ssh/id_ed25519", "~/.ssh/id_rsa", "~/.ssh/id_ecdsa"]:
-            path = os.path.expanduser(keyfile)
-            if os.path.exists(path):
-                result = subprocess.run(
-                    ["ssh-keygen", "-y", "-f", path],
-                    capture_output=True, text=True,
-                )
-                if result.returncode == 0:
-                    pubkey = result.stdout.strip()
-                    break
-    if not pubkey:
-        raise RuntimeError("No SSH public key found. Generate one with: ssh-keygen")
-
-    tmp = tempfile.NamedTemporaryFile(
-        mode="w", suffix=".pub", prefix="bench_key_", delete=False,
-    )
-    tmp.write(pubkey + "\n")
-    tmp.close()
-    os.chmod(tmp.name, 0o600)
-    return tmp.name
+    run_cmd(["docker", "build", "-t", IMAGE_NAME, "-f",
+             os.path.join(DOCKER_DIR, "Dockerfile.bench"), PROJECT_DIR])
 
 
 def docker_start():
@@ -108,37 +75,12 @@ def docker_start():
         "docker", "run", "-d",
         "--name", CONTAINER_NAME,
         "-p", f"{SSH_PORT}:22",
-        "-e", "SSH_ENABLE_ROOT=true",
         IMAGE_NAME,
     ])
 
     print(f"Waiting for SSH on :{SSH_PORT} …")
     if not wait_tcp("127.0.0.1", SSH_PORT):
         raise RuntimeError("SSH not reachable")
-
-    # Inject SSH public key via docker cp (volume mounts have permission issues)
-    pubkey_path = _get_ssh_pubkey_path()
-    try:
-        run_cmd(["docker", "exec", CONTAINER_NAME, "mkdir", "-p", "/root/.ssh"])
-        run_cmd(["docker", "cp", pubkey_path,
-                 f"{CONTAINER_NAME}:/root/.ssh/authorized_keys"])
-        run_cmd(["docker", "exec", CONTAINER_NAME,
-                 "chmod", "600", "/root/.ssh/authorized_keys"])
-        run_cmd(["docker", "exec", CONTAINER_NAME,
-                 "chown", "root:root", "/root/.ssh/authorized_keys"])
-    finally:
-        os.unlink(pubkey_path)
-
-    # Enable TCP forwarding (panubo/sshd disables it by default)
-    run_cmd(["docker", "exec", CONTAINER_NAME, "sed", "-i",
-             "s/AllowTcpForwarding no/AllowTcpForwarding yes/",
-             "/etc/ssh/sshd_config"])
-    # Restart sshd to pick up the config change
-    run_cmd(["docker", "exec", CONTAINER_NAME, "sh", "-c",
-             "pkill sshd; sleep 0.5; /usr/sbin/sshd -D -e -f /etc/ssh/sshd_config &"])
-    time.sleep(2)
-    if not wait_tcp("127.0.0.1", SSH_PORT):
-        raise RuntimeError("SSH not reachable after sshd restart")
 
     for cmd in [
         "nohup python3 -m http.server 8080 --directory /srv/bench >/dev/null 2>&1 &",
@@ -210,6 +152,7 @@ def start_native_tunnel(remote_port, local_port):
     proc = subprocess.Popen(
         [
             "ssh",
+            "-i", TEST_KEY_PATH,
             "-o", "StrictHostKeyChecking=no",
             "-o", "UserKnownHostsFile=/dev/null",
             "-p", str(SSH_PORT),

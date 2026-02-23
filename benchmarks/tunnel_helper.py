@@ -23,6 +23,8 @@ import time
 
 BENCH_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_DIR = os.path.dirname(BENCH_DIR)
+DOCKER_DIR = os.path.join(PROJECT_DIR, "docker")
+TEST_KEY_PATH = os.path.join(DOCKER_DIR, "test_key")
 
 
 def wait_tcp(host, port, timeout=30):
@@ -48,6 +50,7 @@ def run_cli_mode(ssh_port, expected_ports):
         f"    HostName 127.0.0.1\n"
         f"    Port {ssh_port}\n"
         f"    User root\n"
+        f"    IdentityFile {TEST_KEY_PATH}\n"
         f"    StrictHostKeyChecking no\n"
         f"    UserKnownHostsFile /dev/null\n"
     )
@@ -128,7 +131,7 @@ def run_direct_mode(ssh_port, remote_port, local_port, buffer_size):
     client = paramiko.SSHClient()
     client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     client.connect("127.0.0.1", port=ssh_port, username="root",
-                   allow_agent=True, timeout=10)
+                   key_filename=TEST_KEY_PATH, allow_agent=False, timeout=10)
 
     tunnel = SSHTunnel(
         ssh_client=client,

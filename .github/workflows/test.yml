@@ -16,6 +16,8 @@ jobs:
       - run: pip install uv
       - run: uv sync --dev
       - run: uv run pytest tests/ -v
+      - name: Build Docker test image
+        run: docker compose -f docker/docker-compose.yml build
       - name: Run integration tests with Docker
         run: uv run pytest tests_integration/ -v
       - run: uv run ruff check ssh_auto_forward/

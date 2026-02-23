@@ -1,0 +1,6 @@
+services:
+  sshd:
+    build: .
+    container_name: ssh-auto-forward-test
+    ports:
+      - "2222:22"

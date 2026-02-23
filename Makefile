@@ -1,4 +1,4 @@
-.PHONY: test setup shell coverage publish-build publish-test publish publish-clean run
+.PHONY: test setup shell coverage publish-build publish-test publish publish-clean run docker-build docker-up docker-down
 
 test:
 	uv run pytest
@@ -26,3 +26,12 @@ publish-clean:
 
 run:
 	uv run python -m ssh_auto_forward.cli hetzner
+
+docker-build:
+	docker compose -f docker/docker-compose.yml build
+
+docker-up:
+	docker compose -f docker/docker-compose.yml up -d --build
+
+docker-down:
+	docker compose -f docker/docker-compose.yml down
