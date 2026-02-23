@@ -166,6 +166,9 @@ def docker_ssh_server():
     except (subprocess.CalledProcessError, FileNotFoundError):
         pytest.skip("Docker not available")
 
+    # Fix key permissions (git doesn't preserve 600)
+    os.chmod(_TEST_KEY_PATH, 0o600)
+
     # Build and start using docker compose
     subprocess.run(
         ["docker", "compose", "-f", os.path.join(_DOCKER_DIR, "docker-compose.yml"),

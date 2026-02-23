@@ -63,6 +63,8 @@ def run_cmd(cmd, **kw):
 
 def docker_build():
     print("Building Docker image …")
+    # Fix key permissions (git doesn't preserve 600)
+    os.chmod(TEST_KEY_PATH, 0o600)
     run_cmd(["docker", "build", "-t", IMAGE_NAME, "-f",
              os.path.join(DOCKER_DIR, "Dockerfile.bench"), PROJECT_DIR])
 
