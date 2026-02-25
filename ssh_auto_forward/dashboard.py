@@ -120,8 +120,6 @@ class TunnelDataTable(DataTable):
                 status = "[green]● Forwarded[/green]"
                 if port in self.forwarder.manual_tunnels:
                     status += " [dim]([bold]manual[/bold])[/dim]"
-                if is_remapped and local_port != port:
-                    status += " [dim][cyan]([bold]remapped[/bold])[/cyan][/dim]"
 
                 # Traffic stats
                 tunnel = self.forwarder.tunnels[port]
@@ -331,40 +329,51 @@ class InputScreen(ModalScreen):
     }
     #dialog {
         width: 50;
-        height: 11;
-        border: thick $background 80%;
+        height: 13;
+        border: thick $primary;
         background: $surface;
+        padding: 1;
     }
     #dialog Vertical {
-        padding: 1 2;
+        height: 1fr;
     }
     #title {
         text-align: center;
         text-style: bold;
+        margin: 0 1 1 1;
     }
     #input {
-        margin: 1 0;
+        margin: 0 1 1 1;
     }
     #buttons {
         height: 3;
     }
     #buttons Horizontal {
         align: center middle;
+        height: 1fr;
     }
     #buttons Button {
-        min-width: 12;
+        min-width: 10;
         margin: 0 1;
     }
     """
 
-    def __init__(self, title: str, prompt: str, initial: str = "", placeholder: str = "", **kwargs):
+    def __init__(self, title: str, prompt: str, initial: str = "", placeholder: str = "", show_reset: bool = False, **kwargs):
         super().__init__(**kwargs)
         self.title_text = title
         self.prompt_text = prompt
         self.initial_value = initial
         self.placeholder_text = placeholder
+        self.show_reset = show_reset
 
     def compose(self) -> ComposeResult:
+        buttons = [
+            Button("OK", variant="primary", id="ok"),
+            Button("Cancel", id="cancel"),
+        ]
+        if self.show_reset:
+            buttons.append(Button("Reset", id="reset"))
+
         yield Vertical(
             Static(self.title_text, id="title"),
             Static(self.prompt_text),
@@ -373,11 +382,7 @@ class InputScreen(ModalScreen):
                 placeholder=self.placeholder_text,
                 id="input",
             ),
-            Horizontal(
-                Button("OK", variant="primary", id="ok"),
-                Button("Cancel", id="cancel"),
-                id="buttons",
-            ),
+            Horizontal(*buttons, id="buttons"),
             id="dialog",
         )
 
@@ -390,6 +395,8 @@ class InputScreen(ModalScreen):
         if event.button.id == "ok":
             input_widget = self.query_one("#input", Input)
             self.dismiss(input_widget.value)
+        elif event.button.id == "reset":
+            self.dismiss("")  # Empty string signals reset
         else:
             self.dismiss(None)
 
@@ -435,7 +442,7 @@ class DashboardApp(App):
         Binding("o", "open_url", "Open URL"),
         Binding("x", "toggle_port", "Toggle port"),
         Binding("enter", "toggle_port", "Toggle port"),
-        Binding("m", "remap_port", "Remap local port"),
+        Binding("m", "remap_port", "Remap port"),
     ]
 
     def __init__(self, forwarder: "SSHAutoForwarder", **kwargs):
@@ -612,13 +619,15 @@ class DashboardApp(App):
                 if current_local is None:
                     current_local = remote_port
 
+                has_custom_remapping = remote_port in self.forwarder.port_remappings
                 self._remote_port_to_remap = remote_port
                 self.push_screen(
                     InputScreen(
-                        title=f"Remap remote port {remote_port}",
+                        title=f"Remap port {remote_port}",
                         prompt="Local port:",
                         initial=str(current_local),
                         placeholder="Enter local port number...",
+                        show_reset=has_custom_remapping,
                     ),
                     self._on_remap_result,
                 )
@@ -627,21 +636,28 @@ class DashboardApp(App):
 
     def _on_remap_result(self, result: str | None) -> None:
         """Handle the input screen result."""
+        remote_port = self._remote_port_to_remap
+
+        # Empty string means reset
+        if result == "":
+            self.forwarder.clear_port_remapping(remote_port)
+            # Restart tunnel if active
+            if remote_port in self.forwarder.tunnels:
+                process_name = self.forwarder.process_names.get(remote_port, "")
+                was_manual = remote_port in self.forwarder.manual_tunnels
+                self.forwarder.stop_forwarding_port(remote_port)
+                self.forwarder.forward_port(remote_port, process_name, manual=was_manual)
+            self.query_one("#status").update(f"[green]✓ Port {remote_port} remapping reset[/green]")
+            table = self.query_one("#tunnels_table", TunnelDataTable)
+            table.refresh_data()
+            return
+
         if result:
             try:
                 local_port = int(result)
-                remote_port = self._remote_port_to_remap
 
                 if local_port < 1 or local_port > 65535:
                     self.query_one("#status").update("[red]✗ Port must be between 1 and 65535[/red]")
-                    return
-
-                if local_port == remote_port and remote_port not in self.forwarder.port_remappings:
-                    # Just set remapping to same port (effectively clearing any custom remap)
-                    self.forwarder.set_port_remapping(remote_port, local_port)
-                    self.query_one("#status").update(f"[green]✓ Port {remote_port} mapped to local {local_port}[/green]")
-                    table = self.query_one("#tunnels_table", TunnelDataTable)
-                    table.refresh_data()
                     return
 
                 success = self.forwarder.set_port_remapping(remote_port, local_port)
