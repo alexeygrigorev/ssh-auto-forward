@@ -319,6 +319,20 @@ class ReconnectOverlay(Static):
     }
     """
 
+    def show_countdown(self, seconds: int) -> None:
+        """Show the overlay with a countdown value."""
+        self.update(f"[bold red]Connection lost[/bold red]\n\nReconnecting in {seconds}...")
+        self.display = True
+
+    def show_connecting(self) -> None:
+        """Show the overlay in 'connecting' state."""
+        self.update("[bold yellow]Reconnecting...[/bold yellow]")
+        self.display = True
+
+    def hide(self) -> None:
+        """Hide the overlay."""
+        self.display = False
+
 
 class InputScreen(ModalScreen):
     """A modal screen for inputting a single value."""
@@ -405,20 +419,6 @@ class InputScreen(ModalScreen):
 
     def on_input_submitted(self, event: Input.Submitted) -> None:
         self.dismiss(event.value)
-
-    def show_countdown(self, seconds: int) -> None:
-        """Show the overlay with a countdown value."""
-        self.update(f"[bold red]Connection lost[/bold red]\n\nReconnecting in {seconds}...")
-        self.display = True
-
-    def show_connecting(self) -> None:
-        """Show the overlay in 'connecting' state."""
-        self.update("[bold yellow]Reconnecting...[/bold yellow]")
-        self.display = True
-
-    def hide(self) -> None:
-        """Hide the overlay."""
-        self.display = False
 
 
 class DashboardApp(App):
