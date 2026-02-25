@@ -428,6 +428,7 @@ class DashboardApp(App):
         if not self._is_connected():
             self._start_reconnect()
             return
+        self.forwarder.scan_and_forward()
         table = self.query_one("#tunnels_table", TunnelDataTable)
         table.refresh_data()
 
@@ -481,6 +482,7 @@ class DashboardApp(App):
         overlay = self.query_one("#reconnect_overlay", ReconnectOverlay)
         overlay.hide()
         self.query_one("#status").update("[green]✓ Reconnected[/green]")
+        self.forwarder.scan_and_forward()
         table = self.query_one("#tunnels_table", TunnelDataTable)
         table.refresh_data()
 
