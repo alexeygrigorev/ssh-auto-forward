@@ -6,9 +6,10 @@ import webbrowser
 from typing import TYPE_CHECKING, List, Tuple
 
 from textual.app import App, ComposeResult
-from textual.widgets import Header, Footer, Static, DataTable, RichLog
-from textual.containers import Vertical
+from textual.widgets import Header, Footer, Static, DataTable, RichLog, Input, Button
+from textual.containers import Vertical, Horizontal
 from textual.binding import Binding
+from textual.screen import ModalScreen
 
 if TYPE_CHECKING:
     from ssh_auto_forward.forwarder import SSHAutoForwarder
@@ -113,11 +114,14 @@ class TunnelDataTable(DataTable):
                 local_display = str(local_port)
                 url = f"http://127.0.0.1:{local_port}"
                 url_display = f"[link={url}]localhost:{local_port}[/link]"
-                if local_port != port:
+                is_remapped = port in self.forwarder.port_remappings
+                if local_port != port or is_remapped:
                     local_display = f"{local_port} (→{port})"
                 status = "[green]● Forwarded[/green]"
                 if port in self.forwarder.manual_tunnels:
                     status += " [dim]([bold]manual[/bold])[/dim]"
+                if is_remapped and local_port != port:
+                    status += " [dim][cyan]([bold]remapped[/bold])[/cyan][/dim]"
 
                 # Traffic stats
                 tunnel = self.forwarder.tunnels[port]
@@ -317,6 +321,81 @@ class ReconnectOverlay(Static):
     }
     """
 
+
+class InputScreen(ModalScreen):
+    """A modal screen for inputting a single value."""
+
+    DEFAULT_CSS = """
+    InputScreen {
+        align: center middle;
+    }
+    #dialog {
+        width: 50;
+        height: 11;
+        border: thick $background 80%;
+        background: $surface;
+    }
+    #dialog Vertical {
+        padding: 1 2;
+    }
+    #title {
+        text-align: center;
+        text-style: bold;
+    }
+    #input {
+        margin: 1 0;
+    }
+    #buttons {
+        height: 3;
+    }
+    #buttons Horizontal {
+        align: center middle;
+    }
+    #buttons Button {
+        min-width: 12;
+        margin: 0 1;
+    }
+    """
+
+    def __init__(self, title: str, prompt: str, initial: str = "", placeholder: str = "", **kwargs):
+        super().__init__(**kwargs)
+        self.title_text = title
+        self.prompt_text = prompt
+        self.initial_value = initial
+        self.placeholder_text = placeholder
+
+    def compose(self) -> ComposeResult:
+        yield Vertical(
+            Static(self.title_text, id="title"),
+            Static(self.prompt_text),
+            Input(
+                value=self.initial_value,
+                placeholder=self.placeholder_text,
+                id="input",
+            ),
+            Horizontal(
+                Button("OK", variant="primary", id="ok"),
+                Button("Cancel", id="cancel"),
+                id="buttons",
+            ),
+            id="dialog",
+        )
+
+    def on_mount(self) -> None:
+        input_widget = self.query_one("#input", Input)
+        input_widget.focus()
+        input_widget.select_all()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "ok":
+            input_widget = self.query_one("#input", Input)
+            self.dismiss(input_widget.value)
+        else:
+            self.dismiss(None)
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        self.dismiss(event.value)
+
     def show_countdown(self, seconds: int) -> None:
         """Show the overlay with a countdown value."""
         self.update(f"[bold red]Connection lost[/bold red]\n\nReconnecting in {seconds}...")
@@ -356,6 +435,7 @@ class DashboardApp(App):
         Binding("o", "open_url", "Open URL"),
         Binding("x", "toggle_port", "Toggle port"),
         Binding("enter", "toggle_port", "Toggle port"),
+        Binding("m", "remap_port", "Remap local port"),
     ]
 
     def __init__(self, forwarder: "SSHAutoForwarder", **kwargs):
@@ -364,6 +444,7 @@ class DashboardApp(App):
         self._log_handler: LogHandler = None
         self._reconnecting = False
         self._countdown_timer = None
+        self._remote_port_to_remap = None
 
     def compose(self) -> ComposeResult:
         """Compose the UI."""
@@ -374,7 +455,7 @@ class DashboardApp(App):
                 f"Auto-forward ports ≤ {self.forwarder.max_auto_port}",
                 id="connection_info",
             ),
-            Static("Press [bold]X/Enter[/bold] to toggle (open/close), [bold]O[/bold] to open URL, [bold]L[/bold] for logs, [bold]Q[/bold] to quit", id="help"),
+            Static("Press [bold]X/Enter[/bold] toggle, [bold]O[/bold] open URL, [bold]M[/bold] remap port, [bold]L[/bold] logs, [bold]Q[/bold] quit", id="help"),
             TunnelDataTable(self.forwarder, id="tunnels_table"),
             Static("", id="status"),
             LogPanel(
@@ -511,6 +592,67 @@ class DashboardApp(App):
         """Open the selected port's URL in browser."""
         table = self.query_one("#tunnels_table", TunnelDataTable)
         table.open_selected_url()
+
+    def action_remap_port(self) -> None:
+        """Remap the selected port to a specific local port."""
+        table = self.query_one("#tunnels_table", TunnelDataTable)
+        cursor_row = table.cursor_row
+        if cursor_row is not None and cursor_row < len(table.rows):
+            try:
+                row_keys = list(table.rows.keys())
+                if cursor_row < len(row_keys):
+                    row_key = row_keys[cursor_row]
+                    cells = table.get_row(row_key)
+                    remote_port = int(str(cells[0]))
+
+                # Show current remapping if exists, otherwise show current local port
+                current_local = self.forwarder.port_remappings.get(remote_port)
+                if current_local is None and remote_port in self.forwarder.local_port_map:
+                    current_local = self.forwarder.local_port_map[remote_port]
+                if current_local is None:
+                    current_local = remote_port
+
+                self._remote_port_to_remap = remote_port
+                self.push_screen(
+                    InputScreen(
+                        title=f"Remap remote port {remote_port}",
+                        prompt="Local port:",
+                        initial=str(current_local),
+                        placeholder="Enter local port number...",
+                    ),
+                    self._on_remap_result,
+                )
+            except (KeyError, IndexError, ValueError, AttributeError):
+                self.query_one("#status").update("[red]✗ No port selected[/red]")
+
+    def _on_remap_result(self, result: str | None) -> None:
+        """Handle the input screen result."""
+        if result:
+            try:
+                local_port = int(result)
+                remote_port = self._remote_port_to_remap
+
+                if local_port < 1 or local_port > 65535:
+                    self.query_one("#status").update("[red]✗ Port must be between 1 and 65535[/red]")
+                    return
+
+                if local_port == remote_port and remote_port not in self.forwarder.port_remappings:
+                    # Just set remapping to same port (effectively clearing any custom remap)
+                    self.forwarder.set_port_remapping(remote_port, local_port)
+                    self.query_one("#status").update(f"[green]✓ Port {remote_port} mapped to local {local_port}[/green]")
+                    table = self.query_one("#tunnels_table", TunnelDataTable)
+                    table.refresh_data()
+                    return
+
+                success = self.forwarder.set_port_remapping(remote_port, local_port)
+                if success:
+                    self.query_one("#status").update(f"[green]✓ Port {remote_port} → local {local_port}[/green]")
+                    table = self.query_one("#tunnels_table", TunnelDataTable)
+                    table.refresh_data()
+                else:
+                    self.query_one("#status").update(f"[red]✗ Local port {local_port} is not available[/red]")
+            except ValueError:
+                self.query_one("#status").update("[red]✗ Invalid port number[/red]")
 
 
 def run_dashboard(forwarder: "SSHAutoForwarder") -> None:

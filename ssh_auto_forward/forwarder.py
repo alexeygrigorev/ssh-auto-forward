@@ -260,6 +260,7 @@ class SSHAutoForwarder:
         self.next_alt_port = port_range[0]
         self.all_remote_ports: Dict[int, str] = {}  # All detected ports (including high ones)
         self.manual_tunnels: Set[int] = set()  # Ports manually forwarded (above max_auto_port)
+        self.port_remappings: Dict[int, int] = {}  # Manual remote -> local port remappings
 
         # Get connection details
         self.config = self._load_ssh_config(host_alias)
@@ -553,13 +554,14 @@ class SSHAutoForwarder:
 
         return None
 
-    def forward_port(self, remote_port: int, process_name: str = "", manual: bool = False) -> bool:
+    def forward_port(self, remote_port: int, process_name: str = "", manual: bool = False, local_port: int = None) -> bool:
         """Create a tunnel for a remote port.
 
         Args:
             remote_port: The remote port to forward
             process_name: Name of the process using the port
             manual: If True, this was manually triggered (bypasses max_auto_port limit)
+            local_port: Specific local port to use (overrides automatic selection)
         """
         if remote_port in self.tunnels:
             return True  # Already forwarded
@@ -579,7 +581,11 @@ class SSHAutoForwarder:
         if remote_port in self.failed_ports:
             return False
 
-        local_port = self.find_available_local_port(remote_port)
+        # Use explicitly provided local_port, or check remappings, or find automatically
+        if local_port is None:
+            local_port = self.port_remappings.get(remote_port)
+        if local_port is None:
+            local_port = self.find_available_local_port(remote_port)
         if local_port is None:
             logger.warning(f"⚠ No available local port for remote port {remote_port}")
             self.failed_ports.add(remote_port)
@@ -622,6 +628,35 @@ class SSHAutoForwarder:
             self.manual_tunnels.discard(remote_port)
             # Remove from failed ports so we can retry if the port comes back
             self.failed_ports.discard(remote_port)
+
+    def set_port_remapping(self, remote_port: int, local_port: int) -> bool:
+        """Set a persistent port remapping and restart the tunnel if active.
+
+        Args:
+            remote_port: The remote port to forward
+            local_port: The local port to map to
+
+        Returns:
+            True if remapping was set successfully, False otherwise
+        """
+        # Validate local port is available
+        if not self.is_local_port_available(local_port):
+            return False
+
+        self.port_remappings[remote_port] = local_port
+
+        # If tunnel is already active, restart it with new port
+        if remote_port in self.tunnels:
+            process_name = self.process_names.get(remote_port, "")
+            was_manual = remote_port in self.manual_tunnels
+            self.stop_forwarding_port(remote_port)
+            return self.forward_port(remote_port, process_name, manual=was_manual)
+
+        return True
+
+    def clear_port_remapping(self, remote_port: int) -> None:
+        """Clear a port remapping."""
+        self.port_remappings.pop(remote_port, None)
 
     def scan_and_forward(self):
         """Scan for new ports and set up forwarding."""
@@ -687,6 +722,7 @@ class SSHAutoForwarder:
         self.manual_tunnels.clear()
         self.failed_ports.clear()
         self.all_remote_ports.clear()
+        # Note: keep port_remappings across reconnects
 
     def _reconnect(self) -> bool:
         """Close old connection, clear state, and retry connect() with backoff.
