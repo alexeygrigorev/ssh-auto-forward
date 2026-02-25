@@ -29,6 +29,8 @@ async def test_dashboard_compose_and_render():
     mock_forwarder.tunnels = {}
     mock_forwarder.local_port_map = {}
     mock_forwarder.manual_tunnels = set()
+    mock_forwarder.port_remappings = {}
+    mock_forwarder.process_names = {}
 
     # Create the app
     app = DashboardApp(mock_forwarder)
@@ -50,6 +52,8 @@ async def test_dashboard_with_empty_ports():
     mock_forwarder.tunnels = {}
     mock_forwarder.local_port_map = {}
     mock_forwarder.manual_tunnels = set()
+    mock_forwarder.port_remappings = {}
+    mock_forwarder.process_names = {}
 
     app = DashboardApp(mock_forwarder)
 
@@ -71,6 +75,8 @@ async def test_dashboard_keyboard_navigation():
     mock_forwarder.tunnels = {}
     mock_forwarder.local_port_map = {}
     mock_forwarder.manual_tunnels = set()
+    mock_forwarder.port_remappings = {}
+    mock_forwarder.process_names = {}
 
     app = DashboardApp(mock_forwarder)
 
@@ -93,6 +99,8 @@ async def test_dashboard_click_selector():
     mock_forwarder.tunnels = {}
     mock_forwarder.local_port_map = {}
     mock_forwarder.manual_tunnels = set()
+    mock_forwarder.port_remappings = {}
+    mock_forwarder.process_names = {}
 
     app = DashboardApp(mock_forwarder)
 
@@ -120,6 +128,8 @@ async def test_dashboard_open_url_with_forwarded_port(mock_webbrowser_open):
     mock_forwarder.tunnels = {8000: mock_tunnel}
     mock_forwarder.local_port_map = {8000: 8000}
     mock_forwarder.manual_tunnels = set()
+    mock_forwarder.port_remappings = {}
+    mock_forwarder.process_names = {}
 
     app = DashboardApp(mock_forwarder)
 
@@ -146,6 +156,8 @@ async def test_dashboard_open_url_with_no_forwarded_port(mock_webbrowser_open):
     mock_forwarder.tunnels = {}  # No forwarded ports
     mock_forwarder.local_port_map = {}
     mock_forwarder.manual_tunnels = set()
+    mock_forwarder.port_remappings = {}
+    mock_forwarder.process_names = {}
 
     app = DashboardApp(mock_forwarder)
 
@@ -171,6 +183,8 @@ async def test_dashboard_toggle_port_to_start():
     mock_forwarder.tunnels = {}  # Port not forwarded
     mock_forwarder.local_port_map = {}
     mock_forwarder.manual_tunnels = set()
+    mock_forwarder.port_remappings = {}
+    mock_forwarder.process_names = {}
     # Mock the forward_port method to return True
     mock_forwarder.forward_port = Mock(return_value=True)
 
@@ -203,6 +217,8 @@ async def test_dashboard_toggle_port_to_stop():
     mock_forwarder.tunnels = {8000: mock_tunnel}  # Port is forwarded
     mock_forwarder.local_port_map = {8000: 8000}
     mock_forwarder.manual_tunnels = set()
+    mock_forwarder.port_remappings = {}
+    mock_forwarder.process_names = {}
     # Mock the stop_forwarding_port method
     mock_forwarder.stop_forwarding_port = Mock()
 
