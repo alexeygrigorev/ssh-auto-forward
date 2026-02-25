@@ -328,8 +328,8 @@ class InputScreen(ModalScreen):
         align: center middle;
     }
     #dialog {
-        width: 50;
-        height: 13;
+        width: 60;
+        height: 14;
         border: thick $primary;
         background: $surface;
         padding: 1;
@@ -354,7 +354,10 @@ class InputScreen(ModalScreen):
     }
     #buttons Button {
         min-width: 10;
-        margin: 0 1;
+        margin: 0 0 0 1;
+    }
+    #buttons Button:last-child {
+        margin-right: 1;
     }
     """
 
