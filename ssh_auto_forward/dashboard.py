@@ -5,13 +5,13 @@ import threading
 import webbrowser
 from typing import TYPE_CHECKING, List, Optional, Set, Tuple
 
-from textual.app import App, ComposeResult
-from textual.widgets import Header, Footer, Static, DataTable, RichLog, Input, Button
-from textual.containers import Vertical, Horizontal
-from textual.binding import Binding
-from textual.screen import ModalScreen
 from textual import events
+from textual.app import App, ComposeResult
+from textual.binding import Binding
+from textual.containers import Horizontal, Vertical
 from textual.keys import Keys
+from textual.screen import ModalScreen
+from textual.widgets import Button, DataTable, Footer, Header, Input, RichLog, Static
 
 if TYPE_CHECKING:
     from ssh_auto_forward.forwarder import SSHAutoForwarder
@@ -165,8 +165,13 @@ class TunnelDataTable(DataTable):
             proc_display = process_name if process_name else "[dim]unknown[/dim]"
 
             self.add_row(
-                str(port), local_display, proc_display, status,
-                traffic_display, speed_display, url_display,
+                str(port),
+                local_display,
+                proc_display,
+                status,
+                traffic_display,
+                speed_display,
+                url_display,
             )
 
             # Track row for previously selected port
@@ -209,14 +214,10 @@ class TunnelDataTable(DataTable):
                     success = self.forwarder.forward_port(remote_port, process_name, manual=True)
                     if success:
                         self.refresh_data()
-                        self.app.query_one("#status").update(
-                            f"[green]✓ Started forwarding port {remote_port}[/green]"
-                        )
+                        self.app.query_one("#status").update(f"[green]✓ Started forwarding port {remote_port}[/green]")
                         return True
                     else:
-                        self.app.query_one("#status").update(
-                            f"[red]✗ Failed to forward port {remote_port}[/red]"
-                        )
+                        self.app.query_one("#status").update(f"[red]✗ Failed to forward port {remote_port}[/red]")
                         return False
             except (KeyError, IndexError, ValueError, AttributeError):
                 pass
@@ -238,9 +239,7 @@ class TunnelDataTable(DataTable):
                 if remote_port in self.forwarder.tunnels:
                     self.forwarder.stop_forwarding_port(remote_port)
                     self.refresh_data()
-                    self.app.query_one("#status").update(
-                        f"[yellow]✗ Stopped forwarding port {remote_port}[/yellow]"
-                    )
+                    self.app.query_one("#status").update(f"[yellow]✗ Stopped forwarding port {remote_port}[/yellow]")
                     return True
             except (KeyError, IndexError, ValueError, AttributeError):
                 pass
@@ -263,9 +262,7 @@ class TunnelDataTable(DataTable):
                     local_port = self.forwarder.local_port_map.get(remote_port, remote_port)
                     url = f"http://127.0.0.1:{local_port}"
                     webbrowser.open(url)
-                    self.app.query_one("#status").update(
-                        f"[green]Opened {url} in browser[/green]"
-                    )
+                    self.app.query_one("#status").update(f"[green]Opened {url} in browser[/green]")
                     return True
             except (KeyError, IndexError, ValueError, AttributeError):
                 pass
@@ -294,9 +291,7 @@ class TunnelDataTable(DataTable):
                     # Port is forwarded - stop it
                     self.forwarder.stop_forwarding_port(remote_port)
                     self.refresh_data()
-                    self.app.query_one("#status").update(
-                        f"[yellow]✗ Stopped forwarding port {remote_port}[/yellow]"
-                    )
+                    self.app.query_one("#status").update(f"[yellow]✗ Stopped forwarding port {remote_port}[/yellow]")
                     return True
                 else:
                     # Port is not forwarded - start it
@@ -304,14 +299,10 @@ class TunnelDataTable(DataTable):
                     success = self.forwarder.forward_port(remote_port, process_name, manual=True)
                     if success:
                         self.refresh_data()
-                        self.app.query_one("#status").update(
-                            f"[green]✓ Started forwarding port {remote_port}[/green]"
-                        )
+                        self.app.query_one("#status").update(f"[green]✓ Started forwarding port {remote_port}[/green]")
                         return True
                     else:
-                        self.app.query_one("#status").update(
-                            f"[red]✗ Failed to forward port {remote_port}[/red]"
-                        )
+                        self.app.query_one("#status").update(f"[red]✗ Failed to forward port {remote_port}[/red]")
                         return False
             except (KeyError, IndexError, ValueError, AttributeError):
                 pass
@@ -540,10 +531,7 @@ class HostSelectorScreen(ModalScreen):
         table = self.query_one("#host_list", DataTable)
 
         # Track if we were on the toggle row before refresh
-        was_on_toggle_row = (
-            table.cursor_row is not None and
-            table.cursor_row < len(table.rows)
-        )
+        was_on_toggle_row = table.cursor_row is not None and table.cursor_row < len(table.rows)
         current_row_key = None
         if was_on_toggle_row:
             row_keys = list(table.rows.keys())
@@ -716,7 +704,9 @@ class DashboardApp(App):
             Static(conn_text, id="connection_info"),
             Static(help_text, id="help"),
             # Only show tunnel table if we have a forwarder
-            TunnelDataTable(self.forwarder, include_config_ports=self._include_config_ports, id="tunnels_table") if self.forwarder else Static("Please select a host...", id="placeholder"),
+            TunnelDataTable(self.forwarder, include_config_ports=self._include_config_ports, id="tunnels_table")
+            if self.forwarder
+            else Static("Please select a host...", id="placeholder"),
             Static("", id="status"),
             LogPanel(
                 Static("[bold]Logs[/bold] (press L to close)", id="logs_title"),
@@ -809,6 +799,7 @@ class DashboardApp(App):
         self.query_one("#status").update(f"[red]Failed to connect to {host}[/red]")
         # Show host selector to try another host
         from ssh_auto_forward.forwarder import get_ssh_hosts_with_local_forward
+
         hosts, hosts_with_lf = get_ssh_hosts_with_local_forward(self._ssh_config_path)
         self.push_screen(HostSelectorScreen(hosts, hosts_with_lf), self._on_host_selected)
 
@@ -833,7 +824,9 @@ class DashboardApp(App):
 
         # Update help text
         help_text = self.query_one("#help")
-        help_text.update("Press [bold]X/Enter[/bold] toggle, [bold]O[/bold] open URL, [bold]M[/bold] remap port, [bold]L[/bold] logs, [bold]Q[/bold] quit")
+        help_text.update(
+            "Press [bold]X/Enter[/bold] toggle, [bold]O[/bold] open URL, [bold]M[/bold] remap port, [bold]L[/bold] logs, [bold]Q[/bold] quit"
+        )
 
         # Replace placeholder with tunnel table
         placeholder = self.query_one("#placeholder")

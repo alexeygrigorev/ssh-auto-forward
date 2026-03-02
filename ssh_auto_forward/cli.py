@@ -6,9 +6,9 @@ import sys
 
 from ssh_auto_forward.__version__ import __version__
 from ssh_auto_forward.forwarder import (
-    SSHAutoForwarder,
-    DEFAULT_SKIP_PORTS,
     DEFAULT_MAX_AUTO_PORT,
+    DEFAULT_SKIP_PORTS,
+    SSHAutoForwarder,
 )
 
 # Configure logging
@@ -80,6 +80,7 @@ Examples:
     if args.verbose:
         logging.getLogger("ssh-auto-forward").setLevel(logging.DEBUG)
         import paramiko.common
+
         paramiko.common.logging.basicConfig(level=paramiko.common.logging.DEBUG)
 
     # Parse port range

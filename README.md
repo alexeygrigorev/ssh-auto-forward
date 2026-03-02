@@ -7,15 +7,19 @@ Automatically detect and forward ports from a remote SSH server to your local ma
 ## Features
 
 - Interactive TUI dashboard - View and manage tunnels in real-time
+- Host selector modal - Choose from your SSH config hosts when no host specified
 - Automatically discovers listening ports on the remote server
 - Shows process names for each forwarded port
 - Forwards ports to your local machine via SSH tunneling
 - Handles port conflicts by finding alternative local ports
+- Remap ports to specific local ports via dashboard
 - Auto-detects new ports and starts forwarding
 - Auto-detects closed ports and stops forwarding
 - Reads connection details from your SSH config
+- Shows SSH LocalForward ports with "Auto (SSH Config)" status
 - Skips well-known ports (< 1000) by default
 - Configurable max auto-forward port (default: 10000)
+- Auto-reconnect on connection loss with countdown
 
 ## Installation
 
@@ -64,9 +68,12 @@ uvx ssh-auto-forward hetzner
 |-----|--------|
 | X / Enter | Toggle port (open if closed, close if opened) |
 | O | Open URL in browser (for forwarded ports) |
+| M | Remap port to specific local port |
 | R | Refresh port list |
 | L | Toggle log panel |
 | Q | Quit |
+
+**Arrow keys** navigate the port list. **Space** works the same as Enter for selections.
 
 ## Options
 
@@ -77,7 +84,6 @@ uvx ssh-auto-forward hetzner
 -s, --skip PORTS           Comma-separated ports to skip (default: all ports < 1000)
 -c, --config PATH          Path to SSH config file
 -m, --max-auto-port PORT   Maximum port to auto-forward (default: 10000)
---include-configs          Include ports already forwarded via SSH config LocalForward
 --cli                      Run in CLI mode instead of dashboard
 --version                  Show version and exit
 ```
@@ -105,9 +111,6 @@ ssh-auto-forward hetzner -v
 
 # Only auto-forward ports up to 5000 (higher ports shown but not auto-forwarded)
 ssh-auto-forward hetzner -m 5000
-
-# Include ports already forwarded via SSH config LocalForward
-ssh-auto-forward hetzner --include-configs
 ```
 
 ## Performance
@@ -132,11 +135,13 @@ The tool reads your SSH config file (`~/.ssh/config`) for connection details. It
 Host myserver
     HostName example.com
     User myuser
-    LocalForward 8080 localhost:8080  # This port is excluded by default
+    LocalForward 5432 db.amazonaws.com:5432
     LocalForward 3000 localhost:3000
 ```
 
-By default, ports that are already forwarded via `LocalForward` are **excluded** from the dashboard list since they're handled by SSH itself. Use `--include-configs` to show them.
+Ports forwarded via `LocalForward` appear in the dashboard with **"Auto (SSH Config)"** status. These are read-only since they're managed by SSH itself, not by ssh-auto-forward.
+
+By default, hosts with `LocalForward` directives are hidden in the host selector. Toggle "Show hosts with local forwards" to display them.
 
 ## Status messages
 
@@ -195,3 +200,37 @@ This starts a Docker container with SSH server and tests against it.
 ```bash
 SSH_AUTO_FORWARD_TEST_HOST=your-server uv run pytest tests_integration/ -v
 ```
+
+## Development
+
+### Code Formatting and Linting
+
+We use [ruff](https://docs.astral.sh/ruff/) for fast Python linting and formatting.
+
+```bash
+# Install ruff (if not using uv sync)
+uv pip install ruff
+
+# Check code
+uv run ruff check ssh_auto_forward/
+
+# Auto-fix issues
+uv run ruff check --fix ssh_auto_forward/
+
+# Format code
+uv run ruff format ssh_auto_forward/
+```
+
+### Pre-commit Hooks
+
+Install pre-commit hooks to automatically run ruff before each commit:
+
+```bash
+# Install pre-commit
+uv pip install pre-commit
+
+# Install the git hooks
+pre-commit install
+```
+
+Now ruff will run automatically on `git commit`.

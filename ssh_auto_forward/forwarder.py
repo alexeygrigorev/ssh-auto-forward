@@ -53,9 +53,7 @@ class SSHTunnel:
 
             self.active = True
             self.forward_thread = threading.Thread(
-                target=self._forward_loop,
-                daemon=True,
-                name=f"Tunnel-{self.local_port}->{self.remote_port}"
+                target=self._forward_loop, daemon=True, name=f"Tunnel-{self.local_port}->{self.remote_port}"
             )
             self.forward_thread.start()
             logger.debug(f"✓ Tunnel active: localhost:{self.local_port} -> {self.remote_host}:{self.remote_port}")
@@ -111,6 +109,7 @@ class SSHTunnel:
     def _pipe(self, sock, chan):
         """Pipe data between socket and SSH channel using blocking I/O with threads."""
         import queue
+
         stop_event = threading.Event()
         error_queue = queue.Queue()
 
@@ -598,9 +597,9 @@ class SSHAutoForwarder:
 
             # Prepare connection parameters
             connect_kwargs = {
-                "hostname": self.config['hostname'],
-                "port": self.config['port'],
-                "username": self.config['user'],
+                "hostname": self.config["hostname"],
+                "port": self.config["port"],
+                "username": self.config["user"],
                 "timeout": 10,
                 "allow_agent": False,  # We'll handle agent manually
             }
@@ -763,7 +762,9 @@ class SSHAutoForwarder:
         # Skip ports that are already forwarded via SSH config LocalForward
         if remote_port in self.config_local_forwards:
             local_port = self.config_local_forwards[remote_port]
-            logger.debug(f"Skipping port {remote_port} (already forwarded via SSH config LocalForward to local port {local_port})")
+            logger.debug(
+                f"Skipping port {remote_port} (already forwarded via SSH config LocalForward to local port {local_port})"
+            )
             return False
 
         # Skip remote ports that match our local forwarding ports - they're likely our own tunnels
@@ -994,6 +995,7 @@ class SSHAutoForwarder:
         """Run with interactive dashboard."""
         # Set up log handler early to capture all logs (including connection logs)
         from ssh_auto_forward.dashboard import LogHandler
+
         log_handler = LogHandler()  # No dashboard yet, will buffer logs
         log_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", "%H:%M:%S"))
         logging.getLogger("ssh-auto-forward").addHandler(log_handler)
@@ -1020,6 +1022,7 @@ class SSHAutoForwarder:
 
             # Launch dashboard (this blocks)
             from ssh_auto_forward.dashboard import run_dashboard
+
             run_dashboard(self)
 
         except KeyboardInterrupt:
