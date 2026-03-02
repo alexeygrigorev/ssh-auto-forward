@@ -401,8 +401,9 @@ async def test_dashboard_host_selection_flow():
 
     # Mock the SSH hosts to return some test hosts
     test_hosts = ["test-server1", "test-server2"]
+    hosts_with_lf = []
 
-    with patch("ssh_auto_forward.forwarder.get_ssh_hosts", return_value=test_hosts):
+    with patch("ssh_auto_forward.forwarder.get_ssh_hosts_with_local_forward", return_value=(test_hosts, hosts_with_lf)):
         with patch("ssh_auto_forward.forwarder.SSHAutoForwarder") as mock_forwarder_class:
             # Mock the forwarder instance
             mock_forwarder = Mock()
