@@ -19,6 +19,8 @@ jobs:
       - run: uv run pytest tests/ -v
       - name: Build Docker test image
         run: docker compose -f docker/docker-compose.yml build
+        timeout-minutes: 5
       - name: Run integration tests with Docker
         run: uv run pytest tests_integration/ -v
+        timeout-minutes: 10
       - run: uv run ruff check ssh_auto_forward/
