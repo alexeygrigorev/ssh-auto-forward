@@ -6,7 +6,7 @@ import webbrowser
 from typing import TYPE_CHECKING, List, Optional, Set, Tuple
 
 from textual.app import App, ComposeResult
-from textual.widgets import Header, Footer, Static, DataTable, RichLog, Input, Button, Label
+from textual.widgets import Header, Footer, Static, DataTable, RichLog, Input, Button
 from textual.containers import Vertical, Horizontal
 from textual.binding import Binding
 from textual.screen import ModalScreen
