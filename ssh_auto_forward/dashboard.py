@@ -3,13 +3,15 @@
 import logging
 import threading
 import webbrowser
-from typing import TYPE_CHECKING, List, Tuple
+from typing import TYPE_CHECKING, List, Optional, Set, Tuple
 
 from textual.app import App, ComposeResult
-from textual.widgets import Header, Footer, Static, DataTable, RichLog, Input, Button
+from textual.widgets import Header, Footer, Static, DataTable, RichLog, Input, Button, Label
 from textual.containers import Vertical, Horizontal
 from textual.binding import Binding
 from textual.screen import ModalScreen
+from textual import events
+from textual.keys import Keys
 
 if TYPE_CHECKING:
     from ssh_auto_forward.forwarder import SSHAutoForwarder
@@ -66,9 +68,10 @@ class LogHandler(logging.Handler):
 class TunnelDataTable(DataTable):
     """A DataTable widget for displaying tunnel information."""
 
-    def __init__(self, forwarder: "SSHAutoForwarder", **kwargs):
+    def __init__(self, forwarder: "SSHAutoForwarder", include_config_ports: bool = False, **kwargs):
         super().__init__(**kwargs)
         self.forwarder = forwarder
+        self.include_config_ports = include_config_ports
         self.cursor_type = "row"
         self.zebra_stripes = True
 
@@ -76,6 +79,7 @@ class TunnelDataTable(DataTable):
         """Set up the table when mounted."""
         self.add_columns("Remote", "Local", "Process", "Status", "Traffic", "Speed", "URL")
         self.refresh_data()
+        self.focus()
 
     def refresh_data(self) -> None:
         """Refresh the table data from the forwarder."""
@@ -101,6 +105,11 @@ class TunnelDataTable(DataTable):
         # Get all remote ports (detected on remote)
         all_ports = dict(self.forwarder.all_remote_ports)
 
+        # Also add ports that have LocalForward in SSH config
+        for port, local_port in self.forwarder.config_local_forwards.items():
+            if port not in all_ports:
+                all_ports[port] = "SSH Config"
+
         # Sort by port number
         row_index = 0
         new_cursor_row = None
@@ -108,6 +117,7 @@ class TunnelDataTable(DataTable):
             process_name = all_ports[port]
             is_forwarded = port in self.forwarder.tunnels
             is_auto_eligible = port <= self.forwarder.max_auto_port
+            is_config_forwarded = port in self.forwarder.config_local_forwards
 
             if is_forwarded:
                 local_port = self.forwarder.local_port_map.get(port, port)
@@ -128,6 +138,15 @@ class TunnelDataTable(DataTable):
                 traffic_display = _human_bytes(total_bytes) if total_bytes > 0 else "-"
                 total_speed = stats["send_speed"] + stats["recv_speed"]
                 speed_display = _human_speed(total_speed)
+            elif is_config_forwarded:
+                # Port is forwarded via SSH config LocalForward (not by this tool)
+                local_port = self.forwarder.config_local_forwards[port]
+                local_display = str(local_port)
+                url = f"http://127.0.0.1:{local_port}"
+                url_display = f"[link={url}]localhost:{local_port}[/link]"
+                status = "[cyan]● Auto (SSH Config)[/cyan]"
+                traffic_display = "-"
+                speed_display = "-"
             elif is_auto_eligible:
                 local_port = ""
                 local_display = "-"
@@ -177,6 +196,13 @@ class TunnelDataTable(DataTable):
                     cells = self.get_row(row_key)
                     # get_row returns list of strings, not Cell objects
                     remote_port = int(str(cells[0]))
+
+                # Skip ports that are forwarded via SSH config
+                if remote_port in self.forwarder.config_local_forwards:
+                    self.app.query_one("#status").update(
+                        f"[dim]Port {remote_port} is forwarded via SSH config - cannot toggle here[/dim]"
+                    )
+                    return False
 
                 if remote_port not in self.forwarder.tunnels:
                     process_name = self.forwarder.all_remote_ports.get(remote_port, "")
@@ -256,6 +282,13 @@ class TunnelDataTable(DataTable):
                     row_key = row_keys[cursor_row]
                     cells = self.get_row(row_key)
                     remote_port = int(str(cells[0]))
+
+                # Skip ports that are forwarded via SSH config (read-only)
+                if remote_port in self.forwarder.config_local_forwards:
+                    self.app.query_one("#status").update(
+                        f"[dim]Port {remote_port} is forwarded via SSH config - cannot toggle here[/dim]"
+                    )
+                    return False
 
                 if remote_port in self.forwarder.tunnels:
                     # Port is forwarded - stop it
@@ -421,6 +454,195 @@ class InputScreen(ModalScreen):
         self.dismiss(event.value)
 
 
+class HostSelectorScreen(ModalScreen):
+    """A modal screen for selecting an SSH host from the config."""
+
+    DEFAULT_CSS = """
+    HostSelectorScreen {
+        align: center middle;
+    }
+    #dialog {
+        width: 60;
+        height: 22;
+        border: thick $primary;
+        background: $surface;
+        padding: 1;
+    }
+    #title {
+        text-align: center;
+        text-style: bold;
+        margin: 0 1 1 1;
+    }
+    #host_list {
+        height: 1fr;
+        margin: 0 1 1 1;
+    }
+    #buttons {
+        height: 3;
+    }
+    #buttons Horizontal {
+        align: center middle;
+        height: 1fr;
+    }
+    #buttons Button {
+        min-width: 12;
+        margin: 0 0 0 1;
+    }
+    #buttons Button:last-child {
+        margin-right: 1;
+    }
+    """
+
+    # Special row key for the toggle item
+    _TOGGLE_ROW_KEY = "__toggle_show_local_forward__"
+
+    def __init__(self, hosts: List[str], hosts_with_local_forward: List[str] = None, **kwargs):
+        super().__init__(**kwargs)
+        self.hosts = hosts
+        self.hosts_with_local_forward = hosts_with_local_forward or []
+        self.selected_host: Optional[str] = None
+        self._showing_local_forward_hosts = False
+
+    def compose(self) -> ComposeResult:
+        yield Vertical(
+            Static("Select SSH Host", id="title"),
+            Static(
+                "Use arrow keys + Enter/Space to select, or press Q to cancel",
+                id="instructions",
+            ),
+            DataTable(id="host_list"),
+            Horizontal(
+                Button("Connect", variant="primary", id="connect"),
+                Button("Cancel", id="cancel"),
+                id="buttons",
+            ),
+            id="dialog",
+        )
+
+    def on_mount(self) -> None:
+        """Set up the host list table."""
+        table = self.query_one("#host_list", DataTable)
+        table.cursor_type = "row"
+        table.add_column("Host", key="host")
+        table.zebra_stripes = True
+
+        if not self.hosts and not self.hosts_with_local_forward:
+            # No hosts found - hide the table and show error message
+            table.display = False
+            self.query_one("#instructions").update("[red]No SSH hosts found in config[/red]")
+            self.query_one("#connect").disabled = True
+        else:
+            # Populate the list
+            self._refresh_host_list()
+
+    def _refresh_host_list(self) -> None:
+        """Refresh the host list table based on current toggle state."""
+        table = self.query_one("#host_list", DataTable)
+
+        # Track if we were on the toggle row before refresh
+        was_on_toggle_row = (
+            table.cursor_row is not None and
+            table.cursor_row < len(table.rows)
+        )
+        current_row_key = None
+        if was_on_toggle_row:
+            row_keys = list(table.rows.keys())
+            if table.cursor_row < len(row_keys):
+                current_row_key = row_keys[table.cursor_row]
+
+        table.clear()
+
+        # Add regular hosts first
+        for host in sorted(self.hosts):
+            table.add_row(host, key=host)
+
+        # Track the toggle row position
+        toggle_row_position = None
+
+        # Add the toggle row if there are hosts with local forward
+        if self.hosts_with_local_forward:
+            if self._showing_local_forward_hosts:
+                table.add_row("[dim]▼ Hide hosts with local forwards[/dim]", key=self._TOGGLE_ROW_KEY)
+                toggle_row_position = len(self.hosts)  # Position after regular hosts
+                # Add hosts with local forward below
+                for host in sorted(self.hosts_with_local_forward):
+                    table.add_row(f"{host} [dim](has LocalForward)[/dim]", key=host)
+            else:
+                table.add_row("[dim]▶ Show hosts with local forwards[/dim]", key=self._TOGGLE_ROW_KEY)
+                toggle_row_position = len(self.hosts)  # Position after regular hosts
+
+        table.focus()
+
+        # If we were on the toggle row, restore focus to it
+        if toggle_row_position is not None and current_row_key == self._TOGGLE_ROW_KEY:
+            table.move_cursor(row=toggle_row_position, animate=False)
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        """Handle row selection in the host list."""
+        if event.row_key == self._TOGGLE_ROW_KEY:
+            # Toggle the show/hide state
+            self._showing_local_forward_hosts = not self._showing_local_forward_hosts
+            self._refresh_host_list()
+        elif event.row_key:
+            # Regular host selection
+            # Strip any markup to get the actual hostname
+            cells = self.query_one("#host_list", DataTable).get_row(event.row_key)
+            host_text = str(cells[0])
+            # Remove the [dim] markup if present
+            if " [dim]" in host_text:
+                host_text = host_text.split(" [dim]")[0]
+            self.selected_host = host_text
+            # Auto-dismiss when a row is selected
+            self.dismiss(self.selected_host)
+
+    def on_key(self, event: events.Key) -> None:
+        """Handle key press events."""
+        # Handle Space key for selection
+        if event.key == Keys.Space:
+            event.stop()
+            table = self.query_one("#host_list", DataTable)
+            cursor_row = table.cursor_row
+            if cursor_row is not None and cursor_row < len(table.rows):
+                row_keys = list(table.rows.keys())
+                if cursor_row < len(row_keys):
+                    row_key = row_keys[cursor_row]
+                    # Trigger the same logic as row selection
+                    if row_key == self._TOGGLE_ROW_KEY:
+                        self._showing_local_forward_hosts = not self._showing_local_forward_hosts
+                        self._refresh_host_list()
+                    elif row_key:
+                        cells = table.get_row(row_key)
+                        host_text = str(cells[0])
+                        if " [dim]" in host_text:
+                            host_text = host_text.split(" [dim]")[0]
+                        self.selected_host = host_text
+                        self.dismiss(self.selected_host)
+
+
+class HostSelectorApp(App):
+    """A simple app for host selection."""
+
+    TITLE = "ssh-auto-forward: Select Host"
+    CSS = """
+    Screen {
+        align: center middle;
+    }
+    """
+
+    def __init__(self, hosts: List[str], hosts_with_local_forward: List[str] = None, **kwargs):
+        super().__init__(**kwargs)
+        self.hosts = hosts
+        self.hosts_with_local_forward = hosts_with_local_forward or []
+        self.selected_host: Optional[str] = None
+
+    def on_mount(self) -> None:
+        self.push_screen(HostSelectorScreen(self.hosts, self.hosts_with_local_forward), self._on_host_selected)
+
+    def _on_host_selected(self, result: Optional[str]) -> None:
+        self.selected_host = result
+        self.exit()
+
+
 class DashboardApp(App):
     """The main dashboard application."""
 
@@ -448,25 +670,53 @@ class DashboardApp(App):
         Binding("m", "remap_port", "Remap port"),
     ]
 
-    def __init__(self, forwarder: "SSHAutoForwarder", **kwargs):
+    def __init__(
+        self,
+        forwarder: Optional["SSHAutoForwarder"] = None,
+        host: str = None,
+        ssh_config_path: str = None,
+        skip_ports: Set = None,
+        port_range: Tuple[int, int] = (3000, 10000),
+        scan_interval: int = 5,
+        max_auto_port: int = 10000,
+        include_config_ports: bool = False,
+        **kwargs,
+    ):
         super().__init__(**kwargs)
         self.forwarder = forwarder
+        self._host = host
+        self._ssh_config_path = ssh_config_path
+        self._skip_ports = skip_ports or set()
+        self._port_range = port_range
+        self._scan_interval = scan_interval
+        self._max_auto_port = max_auto_port
+        self._include_config_ports = include_config_ports
         self._log_handler: LogHandler = None
         self._reconnecting = False
         self._countdown_timer = None
         self._remote_port_to_remap = None
+        self._waiting_for_host = forwarder is None
 
     def compose(self) -> ComposeResult:
         """Compose the UI."""
         yield Header()
-        yield Vertical(
-            Static(
+
+        # Connection info - different based on whether we have a forwarder
+        if self.forwarder:
+            conn_text = (
                 f"[bold cyan]Connected to: {self.forwarder.host_alias}[/bold cyan] | "
-                f"Auto-forward ports ≤ {self.forwarder.max_auto_port}",
-                id="connection_info",
-            ),
-            Static("Press [bold]X/Enter[/bold] toggle, [bold]O[/bold] open URL, [bold]M[/bold] remap port, [bold]L[/bold] logs, [bold]Q[/bold] quit", id="help"),
-            TunnelDataTable(self.forwarder, id="tunnels_table"),
+                f"Auto-forward ports ≤ {self.forwarder.max_auto_port}"
+            )
+            help_text = "Press [bold]X/Enter[/bold] toggle, [bold]O[/bold] open URL, [bold]M[/bold] remap port, [bold]L[/bold] logs, [bold]Q[/bold] quit"
+        else:
+            conn_text = "[bold yellow]Select a host to connect...[/bold yellow]"
+            help_text = "Press [bold]Q[/bold] to quit"
+
+        yield Vertical(
+            Static(conn_text, id="connection_info"),
+            Static(help_text, id="help"),
+            # Only show tunnel table if we have a forwarder
+            TunnelDataTable(self.forwarder, include_config_ports=self._include_config_ports, id="tunnels_table") if self.forwarder else Static("Please select a host...", id="placeholder"),
             Static("", id="status"),
             LogPanel(
                 Static("[bold]Logs[/bold] (press L to close)", id="logs_title"),
@@ -480,7 +730,18 @@ class DashboardApp(App):
 
     def on_mount(self) -> None:
         """Set up refresh timer and log handler when mounted."""
-        self.set_interval(5, self.auto_refresh)
+        # Only set up auto-refresh if we have a forwarder
+        if self.forwarder:
+            self.set_interval(5, self.auto_refresh)
+        elif self._host:
+            # Host was provided, create forwarder directly
+            self._create_forwarder_and_connect(self._host)
+        else:
+            # No host provided - show host selector
+            from ssh_auto_forward.forwarder import get_ssh_hosts_with_local_forward
+
+            hosts, hosts_with_lf = get_ssh_hosts_with_local_forward(self._ssh_config_path)
+            self.push_screen(HostSelectorScreen(hosts, hosts_with_lf), self._on_host_selected)
 
         # Set up log handler to capture logs
         self._log_handler = LogHandler(self)
@@ -496,6 +757,95 @@ class DashboardApp(App):
             self.add_log(msg, level)
         _log_buffer.clear()
 
+    def _create_forwarder_and_connect(self, host: str) -> None:
+        """Create a forwarder and connect to the specified host in background."""
+        from ssh_auto_forward.forwarder import SSHAutoForwarder
+
+        self._host = host
+        self.forwarder = SSHAutoForwarder(
+            host_alias=host,
+            ssh_config_path=self._ssh_config_path,
+            skip_ports=self._skip_ports,
+            port_range=self._port_range,
+            scan_interval=self._scan_interval,
+            max_auto_port=self._max_auto_port,
+        )
+
+        # Update status to show we're connecting
+        self.query_one("#status").update(f"[yellow]Connecting to {host}...[/yellow]")
+
+        # Run connection in background thread so UI updates (logs) are visible
+        threading.Thread(target=self._do_connect, args=(host,), daemon=True).start()
+
+    def _do_connect(self, host: str) -> None:
+        """Perform the connection in a background thread."""
+        logger = logging.getLogger("ssh-auto-forward")
+        logger.info(f"Connecting to {host}...")
+
+        success = self.forwarder.connect()
+
+        if success:
+            logger.info("Connected successfully!")
+            # Update UI on main thread
+            self.call_from_thread(self._on_connected_success)
+        else:
+            logger.error(f"Failed to connect to {host}")
+            # Update UI on main thread
+            self.call_from_thread(self._on_connected_failed, host)
+
+    def _on_connected_success(self) -> None:
+        """Called on main thread after successful connection."""
+        # Update UI
+        self._update_ui_for_connected_host()
+        # Start auto-refresh
+        self.set_interval(5, self.auto_refresh)
+        # Initial scan
+        self.forwarder.scan_and_forward()
+        # Clear status
+        self.query_one("#status").update("[green]Connected[/green]")
+
+    def _on_connected_failed(self, host: str) -> None:
+        """Called on main thread after failed connection."""
+        self.query_one("#status").update(f"[red]Failed to connect to {host}[/red]")
+        # Show host selector to try another host
+        from ssh_auto_forward.forwarder import get_ssh_hosts_with_local_forward
+        hosts, hosts_with_lf = get_ssh_hosts_with_local_forward(self._ssh_config_path)
+        self.push_screen(HostSelectorScreen(hosts, hosts_with_lf), self._on_host_selected)
+
+    def _on_host_selected(self, result: Optional[str]) -> None:
+        """Called when a host is selected from the host selector."""
+        if not result:
+            # User cancelled - exit the app
+            self.exit()
+            return
+
+        # Use the shared connection logic
+        self._create_forwarder_and_connect(result)
+
+    def _update_ui_for_connected_host(self) -> None:
+        """Update the UI after successfully connecting to a host."""
+        # Update connection info
+        conn_info = self.query_one("#connection_info")
+        conn_info.update(
+            f"[bold cyan]Connected to: {self.forwarder.host_alias}[/bold cyan] | "
+            f"Auto-forward ports ≤ {self.forwarder.max_auto_port}"
+        )
+
+        # Update help text
+        help_text = self.query_one("#help")
+        help_text.update("Press [bold]X/Enter[/bold] toggle, [bold]O[/bold] open URL, [bold]M[/bold] remap port, [bold]L[/bold] logs, [bold]Q[/bold] quit")
+
+        # Replace placeholder with tunnel table
+        placeholder = self.query_one("#placeholder")
+        if placeholder:
+            placeholder.remove()
+            main_content = self.query_one("#main_content", Vertical)
+            # Insert the table before the status message
+            table = TunnelDataTable(self.forwarder, include_config_ports=self._include_config_ports, id="tunnels_table")
+            main_content.mount(table, before=self.query_one("#status"))
+            # Focus the table so arrow keys work immediately
+            table.focus()
+
     def add_log(self, message: str, level: int) -> None:
         """Add a log message to the log widget."""
         log_widget = self.query_one("#logs", RichLog)
@@ -510,10 +860,14 @@ class DashboardApp(App):
 
     def _is_connected(self) -> bool:
         """Check if the SSH connection is still alive."""
+        if not self.forwarder:
+            return False
         return self.forwarder._is_connected()
 
     def auto_refresh(self) -> None:
         """Auto-refresh the table data and check connection health."""
+        if not self.forwarder:
+            return
         if self._reconnecting:
             return
         if not self._is_connected():
@@ -674,7 +1028,89 @@ class DashboardApp(App):
                 self.query_one("#status").update("[red]✗ Invalid port number[/red]")
 
 
-def run_dashboard(forwarder: "SSHAutoForwarder") -> None:
-    """Run the dashboard app."""
-    app = DashboardApp(forwarder)
+def run_dashboard(
+    forwarder: "SSHAutoForwarder" = None,
+    host: str = None,
+    ssh_config_path: str = None,
+    skip_ports: Set = None,
+    port_range: Tuple[int, int] = (3000, 10000),
+    scan_interval: int = 5,
+    max_auto_port: int = 10000,
+    include_config_ports: bool = False,
+) -> None:
+    """Run the dashboard app.
+
+    Args:
+        forwarder: Optional SSHAutoForwarder instance. If not provided, host must be specified.
+        host: Optional host alias. If not provided, user will be prompted to select.
+        ssh_config_path: Path to SSH config file.
+        skip_ports: Ports to skip forwarding.
+        port_range: Local port range to use.
+        scan_interval: Scan interval in seconds.
+        max_auto_port: Maximum port to auto-forward.
+        include_config_ports: If True, include ports already forwarded via SSH config LocalForward.
+    """
+    # Set up log handler early to capture all logs (including connection logs)
+    log_handler = LogHandler()  # No dashboard yet, will buffer logs
+    log_handler.setFormatter(logging.Formatter("%(asctime)s [%(levelname)s] %(message)s", "%H:%M:%S"))
+    logging.getLogger("ssh-auto-forward").addHandler(log_handler)
+
+    # Remove console handler for dashboard mode (logs go to dashboard panel only)
+    logger = logging.getLogger("ssh-auto-forward")
+    console_handler = None
+    for handler in logger.handlers:
+        if isinstance(handler, logging.StreamHandler) and not isinstance(handler, logging.FileHandler):
+            console_handler = handler
+            break
+
+    try:
+        if console_handler:
+            logger.removeHandler(console_handler)
+
+        # If forwarder is provided, use it (backward compatibility)
+        if forwarder is not None:
+            app = DashboardApp(forwarder, include_config_ports=include_config_ports)
+            app.run()
+            return
+
+        # Otherwise, create app with optional host (will prompt if not provided)
+        app = DashboardApp(
+            forwarder=None,
+            host=host,
+            ssh_config_path=ssh_config_path,
+            skip_ports=skip_ports,
+            port_range=port_range,
+            scan_interval=scan_interval,
+            max_auto_port=max_auto_port,
+            include_config_ports=include_config_ports,
+        )
+        app.run()
+    finally:
+        # Restore console handler
+        if console_handler:
+            logger.addHandler(console_handler)
+        # Remove the dashboard log handler
+        logger.removeHandler(log_handler)
+
+
+def run_host_selector(ssh_config_path: str = None) -> Optional[str]:
+    """Run the host selector and return the selected host.
+
+    Args:
+        ssh_config_path: Path to SSH config file.
+
+    Returns:
+        The selected host name, or None if cancelled.
+    """
+    from ssh_auto_forward.forwarder import get_ssh_hosts
+
+    hosts = get_ssh_hosts(ssh_config_path)
+
+    if not hosts:
+        logger = logging.getLogger("ssh-auto-forward")
+        logger.error("No SSH hosts found in config file")
+        return None
+
+    app = HostSelectorApp(hosts)
     app.run()
+    return app.selected_host

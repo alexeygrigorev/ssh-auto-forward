@@ -6,7 +6,7 @@ import re
 import socket
 import threading
 import time
-from typing import Dict, Optional, Set, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 import paramiko
 from paramiko import SSHClient
@@ -232,6 +232,172 @@ class SSHTunnel:
         logger.info(f"✗ Tunnel stopped: localhost:{self.local_port} -> {self.remote_host}:{self.remote_port}{proc_suffix}")
 
 
+def _find_ssh_config() -> str:
+    """Find the SSH config file.
+
+    Checks SSH_CONFIG environment variable first, then standard paths.
+    """
+    # Check SSH_CONFIG environment variable (like ssh does)
+    env_config = os.getenv("SSH_CONFIG")
+    if env_config and os.path.exists(env_config):
+        return env_config
+
+    home = os.path.expanduser("~")
+    for path in [".ssh/config", ".ssh/config.d/*"]:
+        full_path = os.path.join(home, path)
+        if os.path.exists(full_path):
+            return full_path
+    return os.path.join(home, ".ssh/config")
+
+
+def get_ssh_hosts(ssh_config_path: Optional[str] = None, exclude_with_local_forward: bool = True) -> List[str]:
+    """Get all host aliases from SSH config file.
+
+    Args:
+        ssh_config_path: Path to SSH config file. If None, uses default path.
+        exclude_with_local_forward: If True, exclude hosts that have LocalForward directives.
+
+    Returns:
+        List of host aliases found in SSH config.
+    """
+    if ssh_config_path is None:
+        ssh_config_path = _find_ssh_config()
+
+    hosts = []
+    hosts_with_local_forward = set()
+
+    if not os.path.exists(ssh_config_path):
+        return hosts
+
+    # Simple SSH config parser to extract Host directives
+    with open(ssh_config_path, "r") as f:
+        current_host = None
+        has_local_forward = False
+
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+
+            parts = line.split(maxsplit=1)
+            if len(parts) < 2:
+                continue
+
+            key, value = parts[0].lower(), parts[1]
+
+            if key == "host":
+                # Save previous host if it had LocalForward
+                if current_host and has_local_forward:
+                    hosts_with_local_forward.add(current_host)
+                # Start new host
+                if "*" in value or "?" in value:
+                    current_host = None
+                    has_local_forward = False
+                else:
+                    current_host = value
+                    has_local_forward = False
+            elif current_host:
+                if key == "localforward":
+                    has_local_forward = True
+                # Other keys don't affect the LocalForward status
+
+        # Don't forget the last host
+        if current_host and has_local_forward:
+            hosts_with_local_forward.add(current_host)
+
+    # Collect hosts (excluding those with LocalForward if requested)
+    for host in hosts_with_local_forward:
+        if not exclude_with_local_forward:
+            hosts.append(host)
+
+    # Second pass to get hosts without LocalForward
+    with open(ssh_config_path, "r") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+
+            parts = line.split(maxsplit=1)
+            if len(parts) < 2:
+                continue
+
+            key, value = parts[0].lower(), parts[1]
+
+            if key == "host":
+                # Skip wildcard patterns
+                if "*" in value or "?" in value:
+                    continue
+                # Only add if not already added (hosts with LocalForward were handled above)
+                if value not in hosts_with_local_forward:
+                    hosts.append(value)
+
+    return hosts
+
+
+def get_ssh_hosts_with_local_forward(ssh_config_path: Optional[str] = None) -> Tuple[List[str], List[str]]:
+    """Get host aliases from SSH config, separating hosts with and without LocalForward.
+
+    Args:
+        ssh_config_path: Path to SSH config file. If None, uses default path.
+
+    Returns:
+        Tuple of (hosts_without_local_forward, hosts_with_local_forward)
+    """
+    if ssh_config_path is None:
+        ssh_config_path = _find_ssh_config()
+
+    hosts_without: List[str] = []
+    hosts_with: List[str] = []
+
+    if not os.path.exists(ssh_config_path):
+        return hosts_without, hosts_with
+
+    # Parse the config file to get hosts and their LocalForward status
+    current_host = None
+    has_local_forward = False
+    all_hosts = {}  # host -> has_local_forward
+
+    with open(ssh_config_path, "r") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+
+            parts = line.split(maxsplit=1)
+            if len(parts) < 2:
+                continue
+
+            key, value = parts[0].lower(), parts[1]
+
+            if key == "host":
+                # Save previous host
+                if current_host is not None:
+                    all_hosts[current_host] = has_local_forward
+                # Start new host
+                if "*" in value or "?" in value:
+                    current_host = None
+                    has_local_forward = False
+                else:
+                    current_host = value
+                    has_local_forward = False
+            elif current_host:
+                if key == "localforward":
+                    has_local_forward = True
+
+        # Don't forget the last host
+        if current_host is not None:
+            all_hosts[current_host] = has_local_forward
+
+    # Separate into two lists
+    for host, has_lf in sorted(all_hosts.items()):
+        if has_lf:
+            hosts_with.append(host)
+        else:
+            hosts_without.append(host)
+
+    return hosts_without, hosts_with
+
+
 class SSHAutoForwarder:
     """Main class that manages SSH connection and auto port forwarding."""
 
@@ -265,22 +431,15 @@ class SSHAutoForwarder:
         # Get connection details
         self.config = self._load_ssh_config(host_alias)
 
+        # Track ports that are already forwarded via SSH config LocalForward
+        self.config_local_forwards: Dict[int, int] = self.config.get("local_forwards", {})
+
     def _find_ssh_config(self) -> str:
         """Find the SSH config file.
 
         Checks SSH_CONFIG environment variable first, then standard paths.
         """
-        # Check SSH_CONFIG environment variable (like ssh does)
-        env_config = os.getenv("SSH_CONFIG")
-        if env_config and os.path.exists(env_config):
-            return env_config
-
-        home = os.path.expanduser("~")
-        for path in [".ssh/config", ".ssh/config.d/*"]:
-            full_path = os.path.join(home, path)
-            if os.path.exists(full_path):
-                return full_path
-        return os.path.join(home, ".ssh/config")
+        return _find_ssh_config()
 
     def _load_ssh_config(self, host_alias: str) -> dict:
         """Load configuration for a host from SSH config."""
@@ -289,6 +448,7 @@ class SSHAutoForwarder:
             "user": os.getenv("USER") or os.getenv("USERNAME"),
             "port": 22,
             "identityfile": None,
+            "local_forwards": {},  # remote_port -> local_port mapping from LocalForward
         }
 
         if not os.path.exists(self.ssh_config_path):
@@ -328,12 +488,42 @@ class SSHAutoForwarder:
                     elif key == "identityfile":
                         # Remove quotes if present
                         config["identityfile"] = value.strip('"').strip("'")
+                    elif key == "localforward":
+                        # Parse LocalForward: [bind_address:]port host:hostport
+                        # e.g., "LocalForward 8080 localhost:8080" or "LocalForward 3000 localhost:3000"
+                        parts = value.split()
+                        if len(parts) >= 2:
+                            try:
+                                # Extract local port (first number)
+                                local_port_str = parts[0]
+                                # Handle bind_address:port format
+                                if ":" in local_port_str:
+                                    local_port_str = local_port_str.split(":")[-1]
+                                local_port = int(local_port_str)
+
+                                # Extract remote port from host:hostport
+                                remote_part = parts[1]
+                                if ":" in remote_part:
+                                    remote_port = int(remote_part.split(":")[-1])
+                                    # Store mapping: remote_port -> local_port
+                                    config["local_forwards"][remote_port] = local_port
+                                    logger.debug(f"Found LocalForward: remote port {remote_port} -> local port {local_port}")
+                            except (ValueError, IndexError):
+                                logger.debug(f"Could not parse LocalForward: {value}")
 
         logger.info(f"Loaded config for '{host_alias}': {config['user']}@{config['hostname']}:{config['port']}")
         return config
 
     def _host_matches(self, pattern: str, host: str) -> bool:
-        """Check if a host pattern matches the target host."""
+        """Check if a host pattern matches the target host.
+
+        For literal host names (no wildcards), require an exact match.
+        For patterns with wildcards (* or ?), use regex matching.
+        """
+        # If pattern has no wildcards, require exact match
+        if "*" not in pattern and "?" not in pattern:
+            return pattern == host
+        # Otherwise, use regex matching for wildcard patterns
         regex = pattern.replace(".", r"\.").replace("*", ".*").replace("?", ".")
         return re.match(regex, host) is not None
 
@@ -568,6 +758,12 @@ class SSHAutoForwarder:
 
         if remote_port in self.skip_ports:
             logger.debug(f"Skipping port {remote_port} (in skip list)")
+            return False
+
+        # Skip ports that are already forwarded via SSH config LocalForward
+        if remote_port in self.config_local_forwards:
+            local_port = self.config_local_forwards[remote_port]
+            logger.debug(f"Skipping port {remote_port} (already forwarded via SSH config LocalForward to local port {local_port})")
             return False
 
         # Skip remote ports that match our local forwarding ports - they're likely our own tunnels

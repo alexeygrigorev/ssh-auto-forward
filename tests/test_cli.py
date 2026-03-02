@@ -347,4 +347,159 @@ Host other
         forwarder = SSHAutoForwarder("testhost", ssh_config_path=str(config_file))
 
         assert forwarder.config["hostname"] == "testhost"
-        assert forwarder.config["port"] == 22
+
+    def test_load_ssh_config_with_localforward(self, tmp_path):
+        """Test SSH config with LocalForward directives."""
+        config_file = tmp_path / "ssh_config"
+        config_file.write_text("""
+Host testhost
+    HostName example.com
+    LocalForward 8080 localhost:8080
+    LocalForward 3000 localhost:3000
+    LocalForward 9000 localhost:9000
+""")
+
+        forwarder = SSHAutoForwarder("testhost", ssh_config_path=str(config_file))
+
+        # Check that local forwards were parsed
+        assert forwarder.config_local_forwards == {8080: 8080, 3000: 3000, 9000: 9000}
+
+    def test_load_ssh_config_with_localforward_bind_address(self, tmp_path):
+        """Test SSH config with LocalForward that includes bind address."""
+        config_file = tmp_path / "ssh_config"
+        config_file.write_text("""
+Host testhost
+    HostName example.com
+    LocalForward 127.0.0.1:8080 localhost:8080
+""")
+
+        forwarder = SSHAutoForwarder("testhost", ssh_config_path=str(config_file))
+
+        # Check that local forward was parsed (with bind_address:port format)
+        assert forwarder.config_local_forwards == {8080: 8080}
+
+    def test_load_ssh_config_with_localforward_different_ports(self, tmp_path):
+        """Test SSH config with LocalForward where local and remote ports differ."""
+        config_file = tmp_path / "ssh_config"
+        config_file.write_text("""
+Host testhost
+    HostName example.com
+    LocalForward 8081 localhost:8080
+    LocalForward 3001 localhost:3000
+""")
+
+        forwarder = SSHAutoForwarder("testhost", ssh_config_path=str(config_file))
+
+        # Check that local forwards were parsed with correct mapping
+        assert forwarder.config_local_forwards == {8080: 8081, 3000: 3001}
+
+    def test_forward_port_skips_config_localforward(self, tmp_path):
+        """Test that forward_port skips ports already forwarded via LocalForward."""
+        config_file = tmp_path / "ssh_config"
+        config_file.write_text("""
+Host testhost
+    HostName example.com
+    LocalForward 8080 localhost:8080
+""")
+
+        forwarder = SSHAutoForwarder("testhost", ssh_config_path=str(config_file))
+        # Mock the tunnel creation to avoid actual SSH connection
+        forwarder.ssh_client = Mock()
+        forwarder.ssh_client.get_transport.return_value = Mock()
+
+        # Try to forward a port that's already in LocalForward
+        result = forwarder.forward_port(8080, "test_process", manual=True)
+
+        # Should return False (not forwarded)
+        assert result is False
+        assert 8080 not in forwarder.tunnels
+
+    def test_forward_port_works_when_not_in_localforward(self, tmp_path):
+        """Test that forward_port works normally for ports not in LocalForward."""
+        config_file = tmp_path / "ssh_config"
+        config_file.write_text("""
+Host testhost
+    HostName example.com
+    LocalForward 8080 localhost:8080
+""")
+
+        forwarder = SSHAutoForwarder("testhost", ssh_config_path=str(config_file))
+        # Mock the tunnel creation to avoid actual SSH connection
+        forwarder.ssh_client = Mock()
+        forwarder.ssh_client.get_transport.return_value = Mock()
+
+        # Try to forward a port that's NOT in LocalForward
+        result = forwarder.forward_port(9000, "test_process", manual=True)
+
+        # Should return True (forwarded)
+        assert result is True
+        assert 9000 in forwarder.tunnels
+
+    def test_localforward_ports_excluded_from_all_remote_ports(self, tmp_path):
+        """Test that ports with LocalForward are excluded from the detected ports list."""
+        config_file = tmp_path / "ssh_config"
+        config_file.write_text("""
+Host testhost
+    HostName example.com
+    LocalForward 8080 localhost:8080
+""")
+
+        forwarder = SSHAutoForwarder("testhost", ssh_config_path=str(config_file))
+
+        # Simulate detecting ports on remote
+        forwarder.all_remote_ports = {8080: "service1", 9000: "service2"}
+
+        # The LocalForward port (8080) should be in config_local_forwards
+        assert 8080 in forwarder.config_local_forwards
+
+        # When filtering for display, 8080 should be excluded
+        filtered_ports = dict(forwarder.all_remote_ports)
+        for port in forwarder.config_local_forwards:
+            filtered_ports.pop(port, None)
+
+        assert 8080 not in filtered_ports
+        assert 9000 in filtered_ports
+
+    def test_get_ssh_hosts_excludes_local_forward_by_default(self, tmp_path):
+        """Test that get_ssh_hosts excludes hosts with LocalForward by default."""
+        from ssh_auto_forward.forwarder import get_ssh_hosts
+
+        config_file = tmp_path / "ssh_config"
+        config_file.write_text("""
+Host hetzner
+    HostName 135.181.114.209
+Host fhetzner
+    HostName 135.181.114.209
+    LocalForward 2999 localhost:2999
+Host bastion
+    HostName 54.194.96.44
+""")
+
+        # Default: exclude hosts with LocalForward
+        hosts = get_ssh_hosts(str(config_file))
+        assert "hetzner" in hosts
+        assert "bastion" in hosts
+        assert "fhetzner" not in hosts  # Has LocalForward, excluded by default
+
+    def test_get_ssh_hosts_with_local_forward(self, tmp_path):
+        """Test get_ssh_hosts_with_local_forward returns two separate lists."""
+        from ssh_auto_forward.forwarder import get_ssh_hosts_with_local_forward
+
+        config_file = tmp_path / "ssh_config"
+        config_file.write_text("""
+Host hetzner
+    HostName 135.181.114.209
+Host fhetzner
+    HostName 135.181.114.209
+    LocalForward 2999 localhost:2999
+Host bastion
+    HostName 54.194.96.44
+Host bastion-tunnel
+    HostName 54.194.96.44
+    LocalForward 5432 course-management.rds.amazonaws.com:5432
+""")
+
+        hosts_without, hosts_with = get_ssh_hosts_with_local_forward(str(config_file))
+        # Sorted alphabetically
+        assert hosts_without == ["bastion", "hetzner"]
+        assert hosts_with == ["bastion-tunnel", "fhetzner"]

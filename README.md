@@ -71,14 +71,15 @@ uvx ssh-auto-forward hetzner
 ## Options
 
 ```
--v, --verbose           Enable verbose logging
--i, --interval SECS     Scan interval in seconds (default: 5)
--p, --port-range MIN:MAX Local port range for remapping (default: 3000:10000)
--s, --skip PORTS        Comma-separated ports to skip (default: all ports < 1000)
--c, --config PATH       Path to SSH config file
--m, --max-auto-port PORT Maximum port to auto-forward (default: 10000)
---cli                   Run in CLI mode instead of dashboard
---version               Show version and exit
+-v, --verbose              Enable verbose logging
+-i, --interval SECS        Scan interval in seconds (default: 5)
+-p, --port-range MIN:MAX   Local port range for remapping (default: 3000:10000)
+-s, --skip PORTS           Comma-separated ports to skip (default: all ports < 1000)
+-c, --config PATH          Path to SSH config file
+-m, --max-auto-port PORT   Maximum port to auto-forward (default: 10000)
+--include-configs          Include ports already forwarded via SSH config LocalForward
+--cli                      Run in CLI mode instead of dashboard
+--version                  Show version and exit
 ```
 
 ## Examples
@@ -104,6 +105,9 @@ ssh-auto-forward hetzner -v
 
 # Only auto-forward ports up to 5000 (higher ports shown but not auto-forwarded)
 ssh-auto-forward hetzner -m 5000
+
+# Include ports already forwarded via SSH config LocalForward
+ssh-auto-forward hetzner --include-configs
 ```
 
 ## Performance
@@ -119,6 +123,20 @@ See [benchmarks/](benchmarks/) for full methodology and results.
 3. Creates SSH tunnels for each discovered port
 4. Continuously monitors for new/closed ports
 5. Handles port conflicts on your local machine
+
+### SSH Config Integration
+
+The tool reads your SSH config file (`~/.ssh/config`) for connection details. It also respects `LocalForward` directives:
+
+```ssh
+Host myserver
+    HostName example.com
+    User myuser
+    LocalForward 8080 localhost:8080  # This port is excluded by default
+    LocalForward 3000 localhost:3000
+```
+
+By default, ports that are already forwarded via `LocalForward` are **excluded** from the dashboard list since they're handled by SSH itself. Use `--include-configs` to show them.
 
 ## Status messages
 

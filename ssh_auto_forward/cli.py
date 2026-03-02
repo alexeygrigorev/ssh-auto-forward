@@ -33,7 +33,11 @@ Examples:
   ssh-auto-forward myserver -s 22,80,443 # Skip specific ports
         """,
     )
-    parser.add_argument("host", help="Host alias from SSH config or hostname")
+    parser.add_argument(
+        "host",
+        nargs="?",
+        help="Host alias from SSH config or hostname (if not specified, you will be prompted to select)",
+    )
     parser.add_argument("-v", "--verbose", action="store_true", help="Enable verbose logging")
     parser.add_argument("-i", "--interval", type=int, default=5, help="Scan interval in seconds (default: 5)")
     parser.add_argument(
@@ -64,6 +68,11 @@ Examples:
         action="store_true",
         help="Run in CLI mode instead of dashboard (for testing/special cases)",
     )
+    parser.add_argument(
+        "--include-configs",
+        action="store_true",
+        help="Include ports that are already forwarded via SSH config LocalForward (default: excluded)",
+    )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
 
     args = parser.parse_args()
@@ -91,21 +100,36 @@ Examples:
             logger.error("Invalid skip ports. Use comma-separated integers (e.g., 22,80,443)")
             sys.exit(1)
 
-    forwarder = SSHAutoForwarder(
-        host_alias=args.host,
-        ssh_config_path=args.config,
-        skip_ports=skip_ports,
-        port_range=port_range,
-        scan_interval=args.interval,
-        max_auto_port=args.max_auto_port,
-    )
-
     if args.cli:
+        # CLI mode requires a host to be specified
+        if not args.host:
+            logger.error("Host is required for CLI mode. Use 'ssh-auto-forward <host>' or omit --cli for interactive mode.")
+            sys.exit(1)
+
+        forwarder = SSHAutoForwarder(
+            host_alias=args.host,
+            ssh_config_path=args.config,
+            skip_ports=skip_ports,
+            port_range=port_range,
+            scan_interval=args.interval,
+            max_auto_port=args.max_auto_port,
+        )
+
         if not forwarder.run():
             sys.exit(1)
     else:
-        # Dashboard is the default
-        forwarder.run_dashboard()
+        # Dashboard mode - host is optional, will prompt if not provided
+        from ssh_auto_forward.dashboard import run_dashboard
+
+        run_dashboard(
+            host=args.host,
+            ssh_config_path=args.config,
+            skip_ports=skip_ports,
+            port_range=port_range,
+            scan_interval=args.interval,
+            max_auto_port=args.max_auto_port,
+            include_config_ports=args.include_configs,
+        )
 
 
 if __name__ == "__main__":

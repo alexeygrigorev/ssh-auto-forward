@@ -25,7 +25,11 @@ publish-clean:
 	rm -r dist/
 
 run:
+	uv run python -m ssh_auto_forward.cli
+
+hetzner:
 	uv run python -m ssh_auto_forward.cli hetzner
+
 
 docker-build:
 	docker compose -f docker/docker-compose.yml build
