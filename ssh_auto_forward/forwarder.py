@@ -622,6 +622,10 @@ class SSHAutoForwarder:
                     connect_kwargs["allow_agent"] = True
 
             self.ssh_client.connect(**connect_kwargs)
+            transport = self.ssh_client.get_transport()
+            if transport:
+                keepalive_interval = int(os.environ.get("SSH_KEEPALIVE_INTERVAL", "15"))
+                transport.set_keepalive(keepalive_interval)
             logger.info("✓ Connected!")
             return True
 
