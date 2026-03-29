@@ -116,9 +116,12 @@ class SSHTunnel:
         def forward_socket_to_channel():
             """Forward data from socket to SSH channel (blocking)."""
             try:
-                sock.settimeout(30)  # 30 second timeout for large transfers
+                sock.settimeout(30)
                 while not stop_event.is_set():
-                    data = sock.recv(65536)
+                    try:
+                        data = sock.recv(65536)
+                    except socket.timeout:
+                        continue  # Idle connection, keep waiting
                     if not data:
                         break
                     chan.sendall(data)
