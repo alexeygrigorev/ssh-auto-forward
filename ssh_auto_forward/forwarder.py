@@ -18,6 +18,11 @@ logger = logging.getLogger("ssh-auto-forward")
 DEFAULT_SKIP_PORTS = set(range(0, 1000))
 # Maximum port to auto-forward by default
 DEFAULT_MAX_AUTO_PORT = 10000
+# Tear down a forwarded connection that is silent in BOTH directions for this
+# many seconds (override via SSH_FORWARD_IDLE_TIMEOUT, 0 disables). Generous by
+# default so healthy long-lived idle connections (WebSocket/SSE) survive; only
+# genuinely abandoned connections are reclaimed.
+DEFAULT_IDLE_TIMEOUT = 3600.0
 
 
 class SSHTunnel:
@@ -117,16 +122,32 @@ class SSHTunnel:
         download) by ensuring data already handed to the kernel send buffer is
         drained before the connection is torn down, instead of being reset by an
         abrupt full close. A fatal error on either side aborts both.
+
+        There is no wall-clock cap on active transfers, so a slow but healthy
+        large download is never killed mid-stream. A connection that goes
+        completely silent in BOTH directions for ``SSH_FORWARD_IDLE_TIMEOUT``
+        seconds (default 1 hour, ``0`` disables) is reclaimed instead, so an
+        abandoned keep-alive socket whose remote never sends EOF cannot leak a
+        thread and SSH channel forever. Any byte in either direction resets the
+        idle clock.
         """
         import queue
 
-        # Set once the connection is fully done (remote closed, or a fatal
-        # error). The upload direction watches this so it does not block
+        # Set once the connection is fully done (remote closed, fatal error, or
+        # idle teardown). The upload direction watches this so it does not block
         # forever on a client that keeps a keep-alive socket open after the
         # remote side has gone away. A clean client-side EOF does NOT set this:
         # the remote may still be streaming the response (half-duplex HTTP).
         done_event = threading.Event()
         error_queue = queue.Queue()
+
+        # Last time a byte moved in either direction (monotonic), shared by both
+        # threads to drive the idle timeout.
+        last_activity = [time.monotonic()]
+        try:
+            idle_timeout = float(os.environ.get("SSH_FORWARD_IDLE_TIMEOUT", DEFAULT_IDLE_TIMEOUT))
+        except (TypeError, ValueError):
+            idle_timeout = DEFAULT_IDLE_TIMEOUT
 
         def forward_socket_to_channel():
             """Forward data from socket (client) to SSH channel (remote)."""
@@ -151,7 +172,8 @@ class SSHTunnel:
                         break
                     chan.sendall(data)
                     self.bytes_sent += len(data)
-                    self.last_activity = time.monotonic()
+                    last_activity[0] = time.monotonic()
+                    self.last_activity = last_activity[0]
             except Exception as e:
                 error_queue.put(("sock_to_chan", e))
                 done_event.set()
@@ -159,9 +181,18 @@ class SSHTunnel:
         def forward_channel_to_socket():
             """Forward data from SSH channel (remote) to socket (client)."""
             try:
-                while True:
-                    # Blocking recv - Paramiko will handle the internals.
-                    data = chan.recv(65536)
+                # A recv timeout lets this thread re-check done_event (so an
+                # error on the upload side tears the connection down promptly)
+                # and enforce the idle timeout, without capping healthy
+                # transfers (recv returns as soon as data is available).
+                chan.settimeout(2.0)
+                while not done_event.is_set():
+                    try:
+                        data = chan.recv(65536)
+                    except socket.timeout:
+                        if idle_timeout and (time.monotonic() - last_activity[0]) > idle_timeout:
+                            break  # Silent in both directions for too long.
+                        continue
                     if not data:
                         # Remote closed its write side (e.g. full HTTP response
                         # body sent). Flush our pending bytes to the client and
@@ -173,7 +204,8 @@ class SSHTunnel:
                         break
                     sock.sendall(data)
                     self.bytes_received += len(data)
-                    self.last_activity = time.monotonic()
+                    last_activity[0] = time.monotonic()
+                    self.last_activity = last_activity[0]
             except Exception as e:
                 error_queue.put(("chan_to_sock", e))
             finally:
@@ -187,10 +219,7 @@ class SSHTunnel:
         t1.start()
         t2.start()
 
-        # Wait for both directions to finish. There is intentionally no
-        # wall-clock cap here: a slow but healthy large transfer must not be
-        # killed mid-stream. Stale/broken connections are still bounded by the
-        # SSH transport keepalive (see connect()).
+        # Wait for both directions to finish.
         t1.join()
         t2.join()
 
