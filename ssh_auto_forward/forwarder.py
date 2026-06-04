@@ -742,9 +742,13 @@ class SSHAutoForwarder:
         if port in self.local_port_map.values():
             return False
 
-        # Check if port can be bound by a socket
+        # Check if port can be bound by a socket. Use SO_REUSEADDR to match how
+        # the tunnel's listener is actually bound in start(); otherwise a port
+        # left in TIME_WAIT (e.g. by a just-closed forwarded connection) is
+        # falsely reported busy and we needlessly remap to port+1.
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 s.bind(("127.0.0.1", port))
                 return True
         except OSError:
