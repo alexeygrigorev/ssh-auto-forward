@@ -4,6 +4,7 @@ import logging
 import os
 import re
 import socket
+import struct
 import threading
 import time
 from typing import Dict, List, Optional, Set, Tuple
@@ -107,50 +108,78 @@ class SSHTunnel:
                 pass
 
     def _pipe(self, sock, chan):
-        """Pipe data between socket and SSH channel using blocking I/O with threads."""
+        """Pipe data between socket and SSH channel using blocking I/O with threads.
+
+        Each direction is independent: when one side reaches EOF it performs a
+        graceful half-close on the destination (shutdown of the write side only)
+        and exits, while the other direction keeps running until it too reaches
+        EOF. This avoids truncating in-flight transfers (e.g. a large HTTP
+        download) by ensuring data already handed to the kernel send buffer is
+        drained before the connection is torn down, instead of being reset by an
+        abrupt full close. A fatal error on either side aborts both.
+        """
         import queue
 
-        stop_event = threading.Event()
+        # Set once the connection is fully done (remote closed, or a fatal
+        # error). The upload direction watches this so it does not block
+        # forever on a client that keeps a keep-alive socket open after the
+        # remote side has gone away. A clean client-side EOF does NOT set this:
+        # the remote may still be streaming the response (half-duplex HTTP).
+        done_event = threading.Event()
         error_queue = queue.Queue()
 
         def forward_socket_to_channel():
-            """Forward data from socket to SSH channel (blocking)."""
+            """Forward data from socket (client) to SSH channel (remote)."""
             try:
-                sock.settimeout(30)
-                while not stop_event.is_set():
+                sock.settimeout(1.0)
+                while not done_event.is_set():
                     try:
                         data = sock.recv(65536)
                     except socket.timeout:
-                        continue  # Idle connection, keep waiting
+                        continue  # Idle connection, keep waiting / re-check done
                     if not data:
+                        # Client closed its write side: signal EOF to the remote
+                        # so the remote server sees the end of the request body.
+                        # Keep this thread alive (looping on done_event) so the
+                        # download direction is never interrupted.
+                        try:
+                            chan.shutdown_write()
+                        except Exception:
+                            pass
+                        while not done_event.is_set():
+                            time.sleep(0.05)
                         break
                     chan.sendall(data)
                     self.bytes_sent += len(data)
                     self.last_activity = time.monotonic()
             except Exception as e:
-                if not stop_event.is_set():
-                    error_queue.put(("sock_to_chan", e))
-            finally:
-                stop_event.set()
+                error_queue.put(("sock_to_chan", e))
+                done_event.set()
 
         def forward_channel_to_socket():
-            """Forward data from SSH channel to socket (blocking)."""
+            """Forward data from SSH channel (remote) to socket (client)."""
             try:
-                while not stop_event.is_set():
-                    if chan.closed or chan.eof_received:
-                        break
-                    # Blocking recv - Paramiko will handle the internals
+                while True:
+                    # Blocking recv - Paramiko will handle the internals.
                     data = chan.recv(65536)
                     if not data:
+                        # Remote closed its write side (e.g. full HTTP response
+                        # body sent). Flush our pending bytes to the client and
+                        # signal EOF without discarding the kernel send buffer.
+                        try:
+                            sock.shutdown(socket.SHUT_WR)
+                        except Exception:
+                            pass
                         break
                     sock.sendall(data)
                     self.bytes_received += len(data)
                     self.last_activity = time.monotonic()
             except Exception as e:
-                if not stop_event.is_set():
-                    error_queue.put(("chan_to_sock", e))
+                error_queue.put(("chan_to_sock", e))
             finally:
-                stop_event.set()
+                # The remote half of the connection is finished (clean or
+                # error). Release the upload thread.
+                done_event.set()
 
         # Start both threads
         t1 = threading.Thread(target=forward_socket_to_channel, daemon=True)
@@ -158,26 +187,12 @@ class SSHTunnel:
         t1.start()
         t2.start()
 
-        # Wait for both threads to complete
-        # Check for errors periodically
-        start_time = time.monotonic()
-        while (t1.is_alive() or t2.is_alive()) and (time.monotonic() - start_time < 300):
-            if not error_queue.empty():
-                break
-            time.sleep(0.1)
-
-        # Signal shutdown
-        stop_event.set()
-
-        # Close socket to unblock threads
-        try:
-            sock.shutdown(socket.SHUT_RDWR)
-        except Exception:
-            pass
-
-        # Wait a bit longer for threads to finish
-        t1.join(timeout=2)
-        t2.join(timeout=2)
+        # Wait for both directions to finish. There is intentionally no
+        # wall-clock cap here: a slow but healthy large transfer must not be
+        # killed mid-stream. Stale/broken connections are still bounded by the
+        # SSH transport keepalive (see connect()).
+        t1.join()
+        t2.join()
 
         # Log any errors
         try:
@@ -187,7 +202,13 @@ class SSHTunnel:
         except queue.Empty:
             pass
 
-        # Cleanup
+        # Cleanup. SO_LINGER makes close() block until queued data is flushed
+        # (with a bounded timeout) so the final bytes of a large download reach
+        # the client instead of being discarded by an abrupt reset.
+        try:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_LINGER, struct.pack("ii", 1, 10))
+        except Exception:
+            pass
         try:
             sock.close()
         except Exception:
@@ -721,9 +742,13 @@ class SSHAutoForwarder:
         if port in self.local_port_map.values():
             return False
 
-        # Check if port can be bound by a socket
+        # Check if port can be bound by a socket. Use SO_REUSEADDR to match how
+        # the tunnel's listener is actually bound in start(); otherwise a port
+        # left in TIME_WAIT (e.g. by a just-closed forwarded connection) is
+        # falsely reported busy and we needlessly remap to port+1.
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 s.bind(("127.0.0.1", port))
                 return True
         except OSError:

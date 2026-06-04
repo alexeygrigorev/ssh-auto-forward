@@ -60,8 +60,11 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "B"]
-ignore = ["B007", "E501"]  # B007: unused loop vars, E501: line too long (allow occasional long lines)
+ignore = ["B007", "E501"]
 
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
+
+[tool.uv]
+exclude-newer = "7 days"
