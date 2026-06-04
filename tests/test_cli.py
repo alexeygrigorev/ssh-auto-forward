@@ -1,11 +1,8 @@
 """Unit tests for ssh-auto-forward CLI."""
 
-import socket
-from unittest.mock import Mock, MagicMock, patch
+from unittest.mock import MagicMock, Mock, patch
 
-import pytest
-
-from ssh_auto_forward.forwarder import SSHAutoForwarder, SSHTunnel, DEFAULT_SKIP_PORTS
+from ssh_auto_forward.forwarder import DEFAULT_SKIP_PORTS, SSHAutoForwarder, SSHTunnel
 
 
 class TestSSHTunnel:
