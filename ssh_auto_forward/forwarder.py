@@ -1,5 +1,6 @@
 """Core SSH forwarding logic."""
 
+import json
 import logging
 import os
 import re
@@ -23,6 +24,58 @@ DEFAULT_MAX_AUTO_PORT = 10000
 # default so healthy long-lived idle connections (WebSocket/SSE) survive; only
 # genuinely abandoned connections are reclaimed.
 DEFAULT_IDLE_TIMEOUT = 3600.0
+PORT_NAMES_PATH = os.path.join(os.path.expanduser("~"), ".ssh-auto-forward", "port-names.json")
+
+
+def _load_port_names(path: str = PORT_NAMES_PATH) -> Dict[str, Dict[str, str]]:
+    """Load saved port names grouped by SSH host alias."""
+    try:
+        if not os.path.exists(path):
+            return {}
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if not isinstance(data, dict):
+            return {}
+        return {
+            str(host): {str(port): str(name) for port, name in ports.items() if str(name)}
+            for host, ports in data.items()
+            if isinstance(ports, dict)
+        }
+    except (OSError, json.JSONDecodeError, TypeError):
+        logger.debug("Could not load saved port names", exc_info=True)
+        return {}
+
+
+def _save_port_names(data: Dict[str, Dict[str, str]], path: str = PORT_NAMES_PATH) -> None:
+    """Persist saved port names."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp_path = f"{path}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, sort_keys=True)
+        f.write("\n")
+    os.replace(tmp_path, path)
+
+
+def _parse_process_info(proc_info: str) -> Tuple[str, Optional[int]]:
+    """Parse process name and PID from ss/netstat process info."""
+    proc_name = "unknown"
+    pid = None
+
+    name_match = re.search(r'"([^"]+)"', proc_info)
+    if name_match:
+        proc_name = name_match.group(1)
+    elif "/" in proc_info:
+        proc_name = proc_info.split("/")[-1].split(",")[0]
+
+    pid_match = re.search(r"pid=(\d+)", proc_info)
+    if not pid_match:
+        pid_match = re.search(r"^(\d+)/", proc_info)
+    if not pid_match:
+        pid_match = re.search(r"/(\d+)(?:/|$)", proc_info)
+    if pid_match:
+        pid = int(pid_match.group(1))
+
+    return proc_name, pid
 
 
 class SSHTunnel:
@@ -473,12 +526,20 @@ class SSHAutoForwarder:
         self.tunnels: Dict[int, SSHTunnel] = {}  # remote_port -> tunnel
         self.local_port_map: Dict[int, int] = {}  # remote_port -> local_port
         self.process_names: Dict[int, str] = {}  # remote_port -> process name
+        self.process_pids: Dict[int, int] = {}  # remote_port -> remote process PID
+        self.process_working_dirs: Dict[int, str] = {}  # remote_port -> remote process cwd
         self.failed_ports: Set[int] = set()  # Ports that failed to forward
         self.running = False
         self.next_alt_port = port_range[0]
         self.all_remote_ports: Dict[int, str] = {}  # All detected ports (including high ones)
         self.manual_tunnels: Set[int] = set()  # Ports manually forwarded (above max_auto_port)
         self.port_remappings: Dict[int, int] = {}  # Manual remote -> local port remappings
+        all_saved_names = _load_port_names()
+        self.port_names: Dict[int, str] = {
+            int(port): name
+            for port, name in all_saved_names.get(self.host_alias, {}).items()
+            if str(port).isdigit()
+        }
 
         # Get connection details
         self.config = self._load_ssh_config(host_alias)
@@ -690,6 +751,31 @@ class SSHAutoForwarder:
             logger.error(f"Connection failed: {e}")
             return False
 
+    def _get_remote_process_cwds(self, pids: Set[int]) -> Dict[int, str]:
+        """Get remote process working directories by PID."""
+        if not pids:
+            return {}
+
+        pid_args = " ".join(str(pid) for pid in sorted(pids))
+        cmd = (
+            f"for pid in {pid_args}; do "
+            'cwd=$(readlink "/proc/$pid/cwd" 2>/dev/null) && printf "%s\\t%s\\n" "$pid" "$cwd"; '
+            "done"
+        )
+        try:
+            stdin, stdout, stderr = self.ssh_client.exec_command(cmd)
+            output = stdout.read().decode().strip()
+        except Exception:
+            logger.debug("Could not read remote process working directories", exc_info=True)
+            return {}
+
+        cwds = {}
+        for line in output.splitlines():
+            pid_str, sep, cwd = line.partition("\t")
+            if sep and pid_str.isdigit() and cwd:
+                cwds[int(pid_str)] = cwd
+        return cwds
+
     def get_remote_listening_ports(self) -> Dict[int, str]:
         """Get the list of listening ports on the remote server with process names."""
         try:
@@ -708,6 +794,7 @@ class SSHAutoForwarder:
                     continue  # Try next command
 
                 ports = {}
+                pids_by_port = {}
                 for line in output.split("\n"):
                     line = line.strip()
                     if not line:
@@ -720,19 +807,21 @@ class SSHAutoForwarder:
                             port_str = addr.split(":")[-1]
                             if port_str.isdigit():
                                 port = int(port_str)
-                                # Extract process name (e.g., "users:((\"mdtohtml-watch\",pid=518168,fd=4))")
+                                # Extract process name and PID (e.g., users:(("python",pid=123,fd=4))).
                                 proc_info = parts[1]
-                                # Try to extract process name from various formats
-                                proc_name = "unknown"
-                                if 'users:("' in proc_info:
-                                    proc_name = proc_info.split('users:("')[1].split('"')[0]
-                                elif 'users:(("' in proc_info:
-                                    proc_name = proc_info.split('users:(("')[1].split('"')[0]
-                                elif "/" in proc_info:
-                                    proc_name = proc_info.split("/")[-1].split(",")[0]
+                                proc_name, pid = _parse_process_info(proc_info)
                                 ports[port] = proc_name
+                                if pid is not None:
+                                    pids_by_port[port] = pid
 
                 if ports:
+                    self.process_pids = pids_by_port
+                    cwds_by_pid = self._get_remote_process_cwds(set(pids_by_port.values()))
+                    self.process_working_dirs = {
+                        port: cwd
+                        for port, pid in pids_by_port.items()
+                        if (cwd := cwds_by_pid.get(pid))
+                    }
                     return ports
 
             # Fallback: just get ports without process names
@@ -757,8 +846,12 @@ class SSHAutoForwarder:
                             ports[int(port_str)] = ""
                 if ports:
                     logger.debug(f"Detected ports using fallback: {cmd.split()[0]}")
+                    self.process_pids = {}
+                    self.process_working_dirs = {}
                     return ports
 
+            self.process_pids = {}
+            self.process_working_dirs = {}
             return {}
 
         except Exception as e:
@@ -883,9 +976,34 @@ class SSHAutoForwarder:
             del self.tunnels[remote_port]
             del self.local_port_map[remote_port]
             self.process_names.pop(remote_port, None)
+            self.process_pids.pop(remote_port, None)
+            self.process_working_dirs.pop(remote_port, None)
             self.manual_tunnels.discard(remote_port)
             # Remove from failed ports so we can retry if the port comes back
             self.failed_ports.discard(remote_port)
+
+    def set_port_name(self, remote_port: int, name: str) -> None:
+        """Set and persist a friendly name for a remote port."""
+        clean_name = name.strip()
+        if clean_name:
+            self.port_names[remote_port] = clean_name
+        else:
+            self.port_names.pop(remote_port, None)
+        self._save_port_names()
+
+    def clear_port_name(self, remote_port: int) -> None:
+        """Clear a saved friendly name for a remote port."""
+        self.port_names.pop(remote_port, None)
+        self._save_port_names()
+
+    def _save_port_names(self) -> None:
+        """Persist friendly port names for this host."""
+        all_saved_names = _load_port_names()
+        if self.port_names:
+            all_saved_names[self.host_alias] = {str(port): name for port, name in sorted(self.port_names.items())}
+        else:
+            all_saved_names.pop(self.host_alias, None)
+        _save_port_names(all_saved_names)
 
     def set_port_remapping(self, remote_port: int, local_port: int) -> bool:
         """Set a persistent port remapping and restart the tunnel if active.
@@ -943,6 +1061,11 @@ class SSHAutoForwarder:
             logger.info(f"✗ Remote port {port} is no longer listening{proc_suffix}, stopping tunnel")
             self.stop_forwarding_port(port)
 
+        closed_detected_ports = set(self.process_pids.keys()) - set(remote_ports.keys())
+        for port in closed_detected_ports:
+            self.process_pids.pop(port, None)
+            self.process_working_dirs.pop(port, None)
+
         # Update terminal title with status
         self._update_terminal_title()
 
@@ -977,10 +1100,12 @@ class SSHAutoForwarder:
         self.tunnels.clear()
         self.local_port_map.clear()
         self.process_names.clear()
+        self.process_pids.clear()
+        self.process_working_dirs.clear()
         self.manual_tunnels.clear()
         self.failed_ports.clear()
         self.all_remote_ports.clear()
-        # Note: keep port_remappings across reconnects
+        # Note: keep port_remappings and port_names across reconnects
 
     def _reconnect(self) -> bool:
         """Close old connection, clear state, and retry connect() with backoff.

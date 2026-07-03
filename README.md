@@ -9,7 +9,8 @@ Automatically detect and forward ports from a remote SSH server to your local ma
 - Interactive TUI dashboard - View and manage tunnels in real-time
 - Host selector modal - Choose from your SSH config hosts when no host specified
 - Automatically discovers listening ports on the remote server
-- Shows process names for each forwarded port
+- Save friendly names for ports per SSH host
+- Shows compact process names and working folders for discovered ports
 - Forwards ports to your local machine via SSH tunneling
 - Handles port conflicts by finding alternative local ports
 - Remap ports to specific local ports via dashboard
@@ -20,6 +21,7 @@ Automatically detect and forward ports from a remote SSH server to your local ma
 - Skips well-known ports (< 1000) by default
 - Configurable max auto-forward port (default: 10000)
 - Auto-reconnect on connection loss with countdown
+- Runs SSH scans in the background so dashboard navigation stays responsive
 
 ## Installation
 
@@ -68,6 +70,7 @@ uvx ssh-auto-forward hetzner
 |-----|--------|
 | X / Enter | Toggle port (open if closed, close if opened) |
 | O | Open URL in browser (for forwarded ports) |
+| N | Name the selected port |
 | M | Remap port to specific local port |
 | R | Refresh port list |
 | L | Toggle log panel |

@@ -24,13 +24,16 @@ _log_buffer: List[Tuple[str, int]] = []
 def _human_bytes(n: int) -> str:
     """Format byte count as human-readable string."""
     if n < 1024:
-        return f"{n} B"
+        return f"{n}B"
     elif n < 1024 * 1024:
-        return f"{n / 1024:.1f} KB"
+        value = n / 1024
+        return f"{value:.0f}K" if value >= 10 else f"{value:.1f}K"
     elif n < 1024 * 1024 * 1024:
-        return f"{n / (1024 * 1024):.1f} MB"
+        value = n / (1024 * 1024)
+        return f"{value:.0f}M" if value >= 10 else f"{value:.1f}M"
     else:
-        return f"{n / (1024 * 1024 * 1024):.1f} GB"
+        value = n / (1024 * 1024 * 1024)
+        return f"{value:.0f}G" if value >= 10 else f"{value:.1f}G"
 
 
 def _human_speed(bps: float) -> str:
@@ -38,11 +41,45 @@ def _human_speed(bps: float) -> str:
     if bps < 1:
         return "idle"
     elif bps < 1024:
-        return f"{bps:.0f} B/s"
+        return f"{bps:.0f}B/s"
     elif bps < 1024 * 1024:
-        return f"{bps / 1024:.1f} KB/s"
+        value = bps / 1024
+        return f"{value:.0f}K/s" if value >= 10 else f"{value:.1f}K/s"
     else:
-        return f"{bps / (1024 * 1024):.1f} MB/s"
+        value = bps / (1024 * 1024)
+        return f"{value:.0f}M/s" if value >= 10 else f"{value:.1f}M/s"
+
+
+def _compact_text(text: str, max_chars: int) -> str:
+    """Truncate text for narrow table display."""
+    if len(text) <= max_chars:
+        return text
+    if max_chars <= 3:
+        return text[:max_chars]
+    return text[: max_chars - 3] + "..."
+
+
+def _compact_path(path: str, max_chars: int = 18, tail_parts: int = 2) -> str:
+    """Format a path for narrow table display."""
+    clean_path = path.strip().replace("\\", "/").rstrip("/")
+    if not clean_path:
+        return "[dim]-[/dim]"
+
+    parts = [part for part in clean_path.split("/") if part]
+    if not parts:
+        return clean_path
+
+    tail = "/".join(parts[-tail_parts:])
+    display = f".../{tail}" if len(parts) > tail_parts else tail
+    if len(display) <= max_chars:
+        return display
+
+    name = parts[-1]
+    basename_display = f".../{name}"
+    if len(basename_display) <= max_chars:
+        return basename_display
+
+    return "..." + name[-(max_chars - 3) :]
 
 
 class LogHandler(logging.Handler):
@@ -60,7 +97,7 @@ class LogHandler(logging.Handler):
                 # Buffer logs until dashboard is ready
                 _log_buffer.append((msg, record.levelno))
             else:
-                self.dashboard.add_log(msg, record.levelno)
+                self.dashboard.call_from_thread(self.dashboard.add_log, msg, record.levelno)
         except Exception:
             pass
 
@@ -77,9 +114,22 @@ class TunnelDataTable(DataTable):
 
     def on_mount(self) -> None:
         """Set up the table when mounted."""
-        self.add_columns("Remote", "Local", "Process", "Status", "Traffic", "Speed", "URL")
+        self.add_column("")
+        self.add_column("Name")
+        self.add_column("Remote")
+        self.add_column("Local")
+        self.add_column("Process")
+        self.add_column("Folder")
+        self.add_column("Data")
+        self.add_column("Speed", width=5)
+        self.add_column("URL")
         self.refresh_data()
         self.focus()
+
+    @staticmethod
+    def _remote_port_from_row(cells: list) -> int:
+        """Extract the remote port from a table row."""
+        return int(str(cells[2]))
 
     def refresh_data(self) -> None:
         """Refresh the table data from the forwarder."""
@@ -95,7 +145,7 @@ class TunnelDataTable(DataTable):
                     row_key = row_keys[old_cursor_row]
                     cells = self.get_row(row_key)
                     # get_row returns list of strings, not Cell objects
-                    selected_port = int(str(cells[0]))
+                    selected_port = self._remote_port_from_row(cells)
         except (IndexError, ValueError, KeyError):
             pass
 
@@ -111,6 +161,13 @@ class TunnelDataTable(DataTable):
                 all_ports[port] = "SSH Config"
 
         # Sort by port number
+        port_names = getattr(self.forwarder, "port_names", {})
+        if not isinstance(port_names, dict):
+            port_names = {}
+        process_working_dirs = getattr(self.forwarder, "process_working_dirs", {})
+        if not isinstance(process_working_dirs, dict):
+            process_working_dirs = {}
+
         row_index = 0
         new_cursor_row = None
         for port in sorted(all_ports.keys()):
@@ -127,9 +184,9 @@ class TunnelDataTable(DataTable):
                 is_remapped = port in self.forwarder.port_remappings
                 if local_port != port or is_remapped:
                     local_display = f"{local_port} (→{port})"
-                status = "[green]● Forwarded[/green]"
+                status = "[green]●[/green]"
                 if port in self.forwarder.manual_tunnels:
-                    status += " [dim]([bold]manual[/bold])[/dim]"
+                    status += "[dim]M[/dim]"
 
                 # Traffic stats
                 tunnel = self.forwarder.tunnels[port]
@@ -144,31 +201,36 @@ class TunnelDataTable(DataTable):
                 local_display = str(local_port)
                 url = f"http://127.0.0.1:{local_port}"
                 url_display = f"[link={url}]localhost:{local_port}[/link]"
-                status = "[cyan]● Auto (SSH Config)[/cyan]"
+                status = "[cyan]●[/cyan]"
                 traffic_display = "-"
                 speed_display = "-"
             elif is_auto_eligible:
                 local_port = ""
                 local_display = "-"
                 url_display = "-"
-                status = "[dim]● Available[/dim]"
+                status = "[dim]●[/dim]"
                 traffic_display = "-"
                 speed_display = "-"
             else:
                 local_port = ""
                 local_display = "-"
                 url_display = "-"
-                status = "[dim]● Available[/dim]"
+                status = "[dim]●[/dim]"
                 traffic_display = "-"
                 speed_display = "-"
 
-            proc_display = process_name if process_name else "[dim]unknown[/dim]"
+            proc_display = _compact_text(process_name, 14) if process_name else "[dim]unknown[/dim]"
+            name = port_names.get(port, "")
+            name_display = _compact_text(name, 16) if name else "[dim]-[/dim]"
+            folder_display = _compact_path(process_working_dirs.get(port, ""))
 
             self.add_row(
+                status,
+                name_display,
                 str(port),
                 local_display,
                 proc_display,
-                status,
+                folder_display,
                 traffic_display,
                 speed_display,
                 url_display,
@@ -200,7 +262,7 @@ class TunnelDataTable(DataTable):
                     row_key = row_keys[cursor_row]
                     cells = self.get_row(row_key)
                     # get_row returns list of strings, not Cell objects
-                    remote_port = int(str(cells[0]))
+                    remote_port = self._remote_port_from_row(cells)
 
                 # Skip ports that are forwarded via SSH config
                 if remote_port in self.forwarder.config_local_forwards:
@@ -234,7 +296,7 @@ class TunnelDataTable(DataTable):
                     row_key = row_keys[cursor_row]
                     cells = self.get_row(row_key)
                     # get_row returns list of strings, not Cell objects
-                    remote_port = int(str(cells[0]))
+                    remote_port = self._remote_port_from_row(cells)
 
                 if remote_port in self.forwarder.tunnels:
                     self.forwarder.stop_forwarding_port(remote_port)
@@ -256,7 +318,7 @@ class TunnelDataTable(DataTable):
                     row_key = row_keys[cursor_row]
                     cells = self.get_row(row_key)
                     # get_row returns list of strings, not Cell objects
-                    remote_port = int(str(cells[0]))
+                    remote_port = self._remote_port_from_row(cells)
 
                 if remote_port in self.forwarder.tunnels:
                     local_port = self.forwarder.local_port_map.get(remote_port, remote_port)
@@ -278,7 +340,7 @@ class TunnelDataTable(DataTable):
                 if cursor_row < len(row_keys):
                     row_key = row_keys[cursor_row]
                     cells = self.get_row(row_key)
-                    remote_port = int(str(cells[0]))
+                    remote_port = self._remote_port_from_row(cells)
 
                 # Skip ports that are forwarded via SSH config (read-only)
                 if remote_port in self.forwarder.config_local_forwards:
@@ -656,6 +718,7 @@ class DashboardApp(App):
         Binding("x", "toggle_port", "Toggle port"),
         Binding("enter", "toggle_port", "Toggle port"),
         Binding("m", "remap_port", "Remap port"),
+        Binding("n", "name_port", "Name port"),
     ]
 
     def __init__(
@@ -683,6 +746,9 @@ class DashboardApp(App):
         self._reconnecting = False
         self._countdown_timer = None
         self._remote_port_to_remap = None
+        self._remote_port_to_name = None
+        self._refresh_lock = threading.Lock()
+        self._refresh_in_progress = False
         self._waiting_for_host = forwarder is None
 
     def compose(self) -> ComposeResult:
@@ -695,7 +761,7 @@ class DashboardApp(App):
                 f"[bold cyan]Connected to: {self.forwarder.host_alias}[/bold cyan] | "
                 f"Auto-forward ports ≤ {self.forwarder.max_auto_port}"
             )
-            help_text = "Press [bold]X/Enter[/bold] toggle, [bold]O[/bold] open URL, [bold]M[/bold] remap port, [bold]L[/bold] logs, [bold]Q[/bold] quit"
+            help_text = "Press [bold]X/Enter[/bold] toggle, [bold]O[/bold] open URL, [bold]N[/bold] name, [bold]M[/bold] remap, [bold]L[/bold] logs, [bold]Q[/bold] quit"
         else:
             conn_text = "[bold yellow]Select a host to connect...[/bold yellow]"
             help_text = "Press [bold]Q[/bold] to quit"
@@ -789,10 +855,10 @@ class DashboardApp(App):
         self._update_ui_for_connected_host()
         # Start auto-refresh
         self.set_interval(5, self.auto_refresh)
-        # Initial scan
-        self.forwarder.scan_and_forward()
         # Clear status
         self.query_one("#status").update("[green]Connected[/green]")
+        # Initial scan runs in the background so the dashboard stays responsive.
+        self._start_background_refresh()
 
     def _on_connected_failed(self, host: str) -> None:
         """Called on main thread after failed connection."""
@@ -825,7 +891,7 @@ class DashboardApp(App):
         # Update help text
         help_text = self.query_one("#help")
         help_text.update(
-            "Press [bold]X/Enter[/bold] toggle, [bold]O[/bold] open URL, [bold]M[/bold] remap port, [bold]L[/bold] logs, [bold]Q[/bold] quit"
+            "Press [bold]X/Enter[/bold] toggle, [bold]O[/bold] open URL, [bold]N[/bold] name, [bold]M[/bold] remap, [bold]L[/bold] logs, [bold]Q[/bold] quit"
         )
 
         # Replace placeholder with tunnel table
@@ -859,16 +925,60 @@ class DashboardApp(App):
 
     def auto_refresh(self) -> None:
         """Auto-refresh the table data and check connection health."""
-        if not self.forwarder:
+        self._start_background_refresh()
+
+    def _start_background_refresh(self, show_status: bool = False) -> None:
+        """Start a background scan if one is not already running."""
+        if not self.forwarder or self._reconnecting:
             return
+
+        with self._refresh_lock:
+            if self._refresh_in_progress:
+                return
+            self._refresh_in_progress = True
+
+        if show_status:
+            self.query_one("#status").update("[dim]Refreshing...[/dim]")
+
+        threading.Thread(target=self._do_background_refresh, args=(show_status,), daemon=True).start()
+
+    def _do_background_refresh(self, show_status: bool = False) -> None:
+        """Run connection checks and remote scans off the UI thread."""
+        try:
+            if not self._is_connected():
+                self.call_from_thread(self._on_background_connection_lost)
+                return
+
+            self.forwarder.scan_and_forward()
+            self.call_from_thread(self._on_background_refresh_done, show_status)
+        except Exception as e:
+            logger = logging.getLogger("ssh-auto-forward")
+            logger.debug(f"Background refresh failed: {e}")
+            self.call_from_thread(self._on_background_refresh_done, False)
+
+    def _on_background_connection_lost(self) -> None:
+        """Handle connection loss detected by the background refresh."""
+        with self._refresh_lock:
+            self._refresh_in_progress = False
+        if not self._reconnecting:
+            self._start_reconnect()
+
+    def _on_background_refresh_done(self, show_status: bool = False) -> None:
+        """Apply background refresh results on the UI thread."""
+        with self._refresh_lock:
+            self._refresh_in_progress = False
+
         if self._reconnecting:
             return
-        if not self._is_connected():
-            self._start_reconnect()
+
+        try:
+            table = self.query_one("#tunnels_table", TunnelDataTable)
+        except Exception:
             return
-        self.forwarder.scan_and_forward()
-        table = self.query_one("#tunnels_table", TunnelDataTable)
+
         table.refresh_data()
+        if show_status:
+            self.query_one("#status").update("[green]⟳ Refreshed[/green]")
 
     def _start_reconnect(self) -> None:
         """Start the reconnection countdown loop."""
@@ -920,7 +1030,6 @@ class DashboardApp(App):
         overlay = self.query_one("#reconnect_overlay", ReconnectOverlay)
         overlay.hide()
         self.query_one("#status").update("[green]✓ Reconnected[/green]")
-        self.forwarder.scan_and_forward()
         table = self.query_one("#tunnels_table", TunnelDataTable)
         table.refresh_data()
 
@@ -931,9 +1040,7 @@ class DashboardApp(App):
     def action_refresh(self) -> None:
         """Refresh the table data."""
         if not self._reconnecting:
-            table = self.query_one("#tunnels_table", TunnelDataTable)
-            table.refresh_data()
-            self.query_one("#status").update("[green]⟳ Refreshed[/green]")
+            self._start_background_refresh(show_status=True)
 
     def action_toggle_logs(self) -> None:
         """Toggle the log panel."""
@@ -950,18 +1057,67 @@ class DashboardApp(App):
         table = self.query_one("#tunnels_table", TunnelDataTable)
         table.open_selected_url()
 
-    def action_remap_port(self) -> None:
-        """Remap the selected port to a specific local port."""
+    def _selected_remote_port(self) -> Optional[int]:
+        """Return the selected remote port, if any."""
         table = self.query_one("#tunnels_table", TunnelDataTable)
         cursor_row = table.cursor_row
-        if cursor_row is not None and cursor_row < len(table.rows):
-            try:
-                row_keys = list(table.rows.keys())
-                if cursor_row < len(row_keys):
-                    row_key = row_keys[cursor_row]
-                    cells = table.get_row(row_key)
-                    remote_port = int(str(cells[0]))
+        if cursor_row is None or cursor_row >= len(table.rows):
+            return None
 
+        try:
+            row_keys = list(table.rows.keys())
+            if cursor_row >= len(row_keys):
+                return None
+            row_key = row_keys[cursor_row]
+            cells = table.get_row(row_key)
+            return TunnelDataTable._remote_port_from_row(cells)
+        except (KeyError, IndexError, ValueError, AttributeError):
+            return None
+
+    def action_name_port(self) -> None:
+        """Name the selected port."""
+        remote_port = self._selected_remote_port()
+        if remote_port is None:
+            self.query_one("#status").update("[red]✗ No port selected[/red]")
+            return
+
+        port_names = getattr(self.forwarder, "port_names", {})
+        if not isinstance(port_names, dict):
+            port_names = {}
+        current_name = port_names.get(remote_port, "")
+        self._remote_port_to_name = remote_port
+        self.push_screen(
+            InputScreen(
+                title=f"Name port {remote_port}",
+                prompt="Name:",
+                initial=current_name,
+                placeholder="e.g. admin UI, API server, database...",
+                show_reset=bool(current_name),
+            ),
+            self._on_name_result,
+        )
+
+    def _on_name_result(self, result: str | None) -> None:
+        """Handle the port name input result."""
+        remote_port = self._remote_port_to_name
+        if remote_port is None or result is None:
+            return
+
+        if result.strip():
+            self.forwarder.set_port_name(remote_port, result)
+            self.query_one("#status").update(f"[green]✓ Saved name for port {remote_port}[/green]")
+        else:
+            self.forwarder.clear_port_name(remote_port)
+            self.query_one("#status").update(f"[green]✓ Cleared name for port {remote_port}[/green]")
+
+        table = self.query_one("#tunnels_table", TunnelDataTable)
+        table.refresh_data()
+
+    def action_remap_port(self) -> None:
+        """Remap the selected port to a specific local port."""
+        remote_port = self._selected_remote_port()
+        if remote_port is not None:
+            try:
                 # Show current remapping if exists, otherwise show current local port
                 current_local = self.forwarder.port_remappings.get(remote_port)
                 if current_local is None and remote_port in self.forwarder.local_port_map:
@@ -983,6 +1139,8 @@ class DashboardApp(App):
                 )
             except (KeyError, IndexError, ValueError, AttributeError):
                 self.query_one("#status").update("[red]✗ No port selected[/red]")
+        else:
+            self.query_one("#status").update("[red]✗ No port selected[/red]")
 
     def _on_remap_result(self, result: str | None) -> None:
         """Handle the input screen result."""

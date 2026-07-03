@@ -4,7 +4,7 @@ import pytest
 from pathlib import Path
 from unittest.mock import Mock, patch
 
-from ssh_auto_forward.dashboard import DashboardApp, HostSelectorScreen, HostSelectorApp
+from ssh_auto_forward.dashboard import DashboardApp, HostSelectorScreen, HostSelectorApp, _compact_path, _compact_text
 from textual.color import Color
 
 
@@ -357,6 +357,17 @@ def test_get_ssh_hosts_missing_config():
         assert hosts == []
 
 
+def test_compact_path_shows_tail_only():
+    assert _compact_path("/home/alexey/projects/client/web-api") == ".../client/web-api"
+    compact = _compact_path("/srv/very-long-application-directory-name")
+    assert len(compact) <= 18
+    assert compact.endswith("directory-name")
+
+
+def test_compact_text_shortens_long_names():
+    assert _compact_text("frontend admin dashboard", 16) == "frontend admi..."
+
+
 @pytest.mark.asyncio
 async def test_dashboard_starts_without_host():
     """Test that dashboard can start without a host and shows placeholder UI."""
@@ -610,6 +621,40 @@ async def test_dashboard_table_has_default_focus():
         # The table should have focus
         table = pilot.app.query_one("#tunnels_table")
         assert table.has_focus
+
+
+@pytest.mark.asyncio
+async def test_dashboard_can_name_selected_port():
+    """Test pressing N saves a friendly name for the selected port."""
+    mock_forwarder = Mock()
+    mock_forwarder.host_alias = "testhost"
+    mock_forwarder.max_auto_port = 10000
+    mock_forwarder.all_remote_ports = {
+        8000: "python",
+    }
+    mock_forwarder.tunnels = {}
+    mock_forwarder.local_port_map = {}
+    mock_forwarder.manual_tunnels = set()
+    mock_forwarder.port_remappings = {}
+    mock_forwarder.port_names = {}
+    mock_forwarder.process_names = {}
+    mock_forwarder.process_working_dirs = {8000: "/srv/app"}
+    mock_forwarder.config_local_forwards = {}
+    mock_forwarder.set_port_name = Mock()
+    mock_forwarder.clear_port_name = Mock()
+
+    app = DashboardApp(mock_forwarder)
+
+    async with app.run_test() as pilot:
+        await pilot.press("down")
+        await pilot.pause()
+        await pilot.press("n")
+        await pilot.pause()
+        await pilot.press("a", "p", "i")
+        await pilot.press("enter")
+        await pilot.pause()
+
+        mock_forwarder.set_port_name.assert_called_once_with(8000, "api")
 
 
 @pytest.mark.asyncio

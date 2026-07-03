@@ -2,7 +2,14 @@
 
 from unittest.mock import MagicMock, Mock, patch
 
-from ssh_auto_forward.forwarder import DEFAULT_SKIP_PORTS, SSHAutoForwarder, SSHTunnel
+from ssh_auto_forward.forwarder import (
+    DEFAULT_SKIP_PORTS,
+    SSHAutoForwarder,
+    SSHTunnel,
+    _load_port_names,
+    _parse_process_info,
+    _save_port_names,
+)
 
 
 class TestSSHTunnel:
@@ -18,6 +25,7 @@ class TestSSHTunnel:
         assert tunnel.remote_port == 8080
         assert tunnel.local_port == 3000
         assert tunnel.active is False
+
 
     def test_tunnel_start_success(self):
         """Test successful tunnel start."""
@@ -75,6 +83,30 @@ class TestSSHTunnel:
 
         assert tunnel.active is False
         tunnel.server_socket.close.assert_called_once()
+
+
+class TestPortMetadata:
+    """Tests for saved names and process metadata parsing."""
+
+    def test_parse_process_info_from_ss(self):
+        proc_name, pid = _parse_process_info('users:(("python",pid=12345,fd=7))')
+
+        assert proc_name == "python"
+        assert pid == 12345
+
+    def test_parse_process_info_from_netstat(self):
+        proc_name, pid = _parse_process_info("12345/node")
+
+        assert proc_name == "node"
+        assert pid == 12345
+
+    def test_port_names_round_trip(self, tmp_path):
+        path = tmp_path / "port-names.json"
+        data = {"devbox": {"3000": "frontend", "8080": "api"}}
+
+        _save_port_names(data, str(path))
+
+        assert _load_port_names(str(path)) == data
 
 
 class TestPortAvailability:
