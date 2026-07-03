@@ -1,4 +1,4 @@
-.PHONY: test setup shell coverage publish-build publish-test publish publish-clean run docker-build docker-up docker-down
+.PHONY: test setup shell coverage publish-build publish-clean release run docker-build docker-up docker-down
 
 test:
 	uv run pytest
@@ -15,14 +15,15 @@ coverage:
 publish-build:
 	uv run hatch build
 
-publish-test:
-	uv run hatch publish --repo test
-
-publish:
-	uv run hatch publish
-
 publish-clean:
 	rm -r dist/
+
+# Release: tag the current version and push to trigger CI publish.
+release:
+	@VERSION=$$(grep -E "^__version__" ssh_auto_forward/__version__.py | sed -E "s/.*['\"]([^'\"]+)['\"].*/\1/"); \
+	echo "Releasing $$VERSION"; \
+	git tag "$$VERSION"; \
+	git push origin "$$VERSION"
 
 run:
 	uv run python -m ssh_auto_forward.cli
