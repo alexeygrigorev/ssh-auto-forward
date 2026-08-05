@@ -736,10 +736,16 @@ class SSHAutoForwarder:
                     connect_kwargs["allow_agent"] = True
 
             self.ssh_client.connect(**connect_kwargs)
+
+            # Configure transport for high-latency/unstable connections
             transport = self.ssh_client.get_transport()
             if transport:
-                keepalive_interval = int(os.environ.get("SSH_KEEPALIVE_INTERVAL", "15"))
+                # Enable keepalive to prevent connection drops (configurable via env)
+                keepalive_interval = int(os.environ.get("SSH_KEEPALIVE_INTERVAL", "30"))
                 transport.set_keepalive(keepalive_interval)
+                # Use compression for better performance on high-latency links
+                transport.use_compression(True)
+
             logger.info("✓ Connected!")
             return True
 
